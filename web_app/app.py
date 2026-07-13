@@ -25,8 +25,7 @@ warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-SRC_DIR = r'c:\Users\qq208\Desktop\网络安全综合课设'
-sys.path.insert(0, SRC_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_selection import SelectKBest, f_classif
@@ -208,8 +207,8 @@ def index():
 @app.route('/api/data/info')
 def data_info():
     try:
-        train_file = os.path.join(SRC_DIR, 'KDDTrain+.txt')
-        test_file = os.path.join(SRC_DIR, 'KDDTest+.txt')
+        train_file = os.path.join(PROJECT_ROOT, 'KDDTrain+.txt')
+        test_file = os.path.join(PROJECT_ROOT, 'KDDTest+.txt')
 
         info = {
             'train_exists': os.path.exists(train_file),
@@ -281,11 +280,11 @@ def preprocess():
             add_msg('preprocessing', f'训练集/测试集比例: {1-test_size:.0%} / {test_size:.0%}')
 
             if dataset == 'small':
-                train_file = os.path.join(SRC_DIR, 'KDDTrain+_20Percent.txt')
+                train_file = os.path.join(PROJECT_ROOT, 'KDDTrain+_20Percent.txt')
             elif dataset == 'train_test':
                 train_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'train_test')
             else:
-                train_file = os.path.join(SRC_DIR, 'KDDTrain+.txt')
+                train_file = os.path.join(PROJECT_ROOT, 'KDDTrain+.txt')
 
             if not os.path.exists(train_file):
                 add_msg('preprocessing', f'错误: 训练文件不存在: {train_file}')
