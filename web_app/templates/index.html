@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KDD Cup 99 网络入侵检测系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .sidebar .nav-link {
+            color: white;
+            border-radius: 8px;
+            margin: 5px 10px;
+            transition: all 0.3s;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            background: rgba(255,255,255,0.2);
+        }
+        .card {
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+        .btn-orange {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            border: none;
+            color: white;
+        }
+        .btn-orange:hover {
+            opacity: 0.9;
+            color: white;
+        }
+        .btn-teal {
+            background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+            border: none;
+            color: white;
+        }
+        .btn-teal:hover {
+            opacity: 0.9;
+            color: white;
+        }
+        .status-badge {
+            font-size: 0.85rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+        .status-running {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status-completed {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status-idle {
+            background-color: #e2e3e5;
+            color: #383d41;
+        }
+        .log-area {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9rem;
+        }
+        .log-item {
+            margin-bottom: 5px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+        }
+        .metric-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .card-body canvas {
+            max-height: 280px;
+            width: 100% !important;
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 20px 15px;
+            text-align: center;
+            min-height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            line-height: 1.2;
+            margin-bottom: 5px;
+        }
+        .metric-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        .confusion-matrix {
+            display: inline-block;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .confusion-cell {
+            padding: 15px 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .confusion-cell.tp { background-color: #d4edda; color: #155724; }
+        .confusion-cell.fn { background-color: #f8d7da; color: #721c24; }
+        .confusion-cell.fp { background-color: #fff3cd; color: #856404; }
+        .confusion-cell.tn { background-color: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <nav class="col-md-2 d-none d-md-block sidebar">
+                <div class="sidebar-sticky pt-3">
+                    <h3 class="text-white text-center mb-4"><i class="fas fa-shield-alt"></i> 入侵检测系统</h3>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#preprocess" onclick="showTab('preprocess')">
+                                <i class="fas fa-database"></i> 数据预处理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#distribution" onclick="showTab('distribution')">
+                                <i class="fas fa-chart-pie"></i> 数据分布
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#training" onclick="showTab('training')">
+                                <i class="fas fa-cogs"></i> 模型训练
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#results" onclick="showTab('results')">
+                                <i class="fas fa-bar-chart"></i> 结果对比
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#testing" onclick="showTab('testing')">
+                                <i class="fas fa-flask"></i> 模型测试
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <main role="main" class="col-md-10 ml-sm-auto px-4">
+                <div class="tab-content" id="main-content">
+                    <div id="tab-preprocess" class="tab-pane fade show active">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-database"></i> 数据预处理</h2>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <div class="row align-items-center">
+                                    <div class="col-md-6">
+                                        <h5>预处理状态</h5>
+                                    </div>
+                                    <div class="col-md-6 text-right">
+                                        <span id="preprocess-status" class="status-badge status-idle">待处理</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>选择训练数据集</strong></label>
+                                            <select id="dataset-select" class="form-select">
+                                                <option value="20percent">20% 训练集（25,192 条，快速实验）</option>
+                                                <option value="full">完整训练集（125,973 条，推荐用于模型测试）</option>
+                                            </select>
+                                            <div class="form-text text-muted">
+                                                <i class="fas fa-info-circle"></i> 
+                                                完整训练集覆盖更多攻击类型，外部测试效果更好
+                                            </div>
+                                        </div>
+                                        <button id="btn-preprocess" class="btn btn-primary btn-lg w-100" onclick="startPreprocessing()">
+                                            <i class="fas fa-play"></i> 开始预处理
+                                        </button>
+                                        <button id="btn-reset-preprocess" class="btn btn-secondary btn-lg w-100 mt-2" onclick="resetPreprocessing()" disabled>
+                                            <i class="fas fa-redo"></i> 重置状态
+                                        </button>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <div class="log-area" id="preprocess-log">
+                                            <div class="text-muted">点击"开始预处理"按钮运行数据预处理流程...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>预处理步骤说明</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-file-csv fa-3x text-primary mb-2"></i>
+                                                <h6 class="card-title">加载数据</h6>
+                                                <p class="card-text text-sm">读取 KDDTrain+_20Percent.txt 数据集</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-search fa-3x text-secondary mb-2"></i>
+                                                <h6 class="card-title">数据探索</h6>
+                                                <p class="card-text text-sm">查看数据基本信息和分布</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-tag fa-3x text-success mb-2"></i>
+                                                <h6 class="card-title">标签处理</h6>
+                                                <p class="card-text text-sm">二分类和多分类标签编码</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-code fa-3x text-danger mb-2"></i>
+                                                <h6 class="card-title">特征编码</h6>
+                                                <p class="card-text text-sm">类别特征 One-Hot 编码</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row mt-3">
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-chart-line fa-3x text-warning mb-2"></i>
+                                                <h6 class="card-title">标准化</h6>
+                                                <p class="card-text text-sm">数值特征 StandardScaler</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-save fa-3x text-info mb-2"></i>
+                                                <h6 class="card-title">保存结果</h6>
+                                                <p class="card-text text-sm">保存预处理后的数据</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-distribution" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-chart-pie"></i> 数据分布</h2>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <button class="btn btn-primary" onclick="loadDistribution()">
+                                    <i class="fas fa-refresh"></i> 加载数据分布
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div id="distribution-content">
+                                    <div class="text-center text-muted py-10">
+                                        <i class="fas fa-chart-pie fa-5x mb-4"></i>
+                                        <p>请先运行数据预处理，然后点击上方按钮查看数据分布</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-training" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-cogs"></i> 模型训练</h2>
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>XGBoost</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-xgboost" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">梯度提升树，竞赛中最常用的模型，性能优异</p>
+                                        <button id="btn-xgboost" class="btn btn-primary w-100 mb-2" onclick="trainModel('xgboost')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="log-area" id="log-xgboost">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>随机森林</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-random_forest" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">集成学习，稳定可靠，易于调参</p>
+                                        <button id="btn-random_forest" class="btn btn-success w-100 mb-2" onclick="trainModel('random_forest')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="log-area" id="log-random_forest">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>DNN</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-dnn" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">深度神经网络，能学习复杂特征组合</p>
+                                        <button id="btn-dnn" class="btn btn-purple w-100 mb-2" onclick="trainModel('dnn')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="log-area" id="log-dnn">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>Isolation Forest</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-isolation_forest" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">异常检测模型，无监督学习，对未知攻击类型有较好泛化能力</p>
+                                        <button id="btn-isolation_forest" class="btn btn-orange w-100 mb-2" onclick="trainModel('isolation_forest')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="log-area" id="log-isolation_forest">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>AutoEncoder</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-autoencoder" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">深度学习异常检测，仅在正常流量上训练，重构误差大则为异常</p>
+                                        <button id="btn-autoencoder" class="btn btn-teal w-100 mb-2" onclick="trainModel('autoencoder')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="log-area" id="log-autoencoder">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>模型参数说明</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <h6>XGBoost 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>n_estimators: 100</li>
+                                            <li>max_depth: 6</li>
+                                            <li>learning_rate: 0.1</li>
+                                            <li>objective: binary:logistic</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <h6>随机森林 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>n_estimators: 100</li>
+                                            <li>max_depth: 10</li>
+                                            <li>min_samples_split: 5</li>
+                                            <li>min_samples_leaf: 2</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <h6>DNN 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>隐藏层: 256 → 128 → 64</li>
+                                            <li>Dropout: 0.3</li>
+                                            <li>学习率: 0.001</li>
+                                            <li>训练轮数: 50</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <h6>Isolation Forest 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>n_estimators: 200</li>
+                                            <li>contamination: 训练集攻击比例</li>
+                                            <li>max_samples: 'auto'</li>
+                                            <li>无监督学习，无需标签</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-results" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-bar-chart"></i> 结果对比</h2>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <button class="btn btn-primary" onclick="loadComparison()">
+                                    <i class="fas fa-refresh"></i> 加载对比结果
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div id="comparison-content">
+                                    <div class="text-center text-muted py-10">
+                                        <i class="fas fa-bar-chart fa-5x mb-4"></i>
+                                        <p>请先训练模型，然后点击上方按钮查看对比结果</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5>特征重要性分析</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <button class="btn btn-primary w-100" onclick="loadFeatureImportance('xgboost')">
+                                            XGBoost 特征重要性
+                                        </button>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button class="btn btn-success w-100" onclick="loadFeatureImportance('random_forest')">
+                                            随机森林 特征重要性
+                                        </button>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button class="btn btn-secondary w-100" disabled>
+                                            DNN（不支持）
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="feature-importance-content" class="mt-4">
+                                    <div class="text-center text-muted">点击上方按钮查看特征重要性</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 模型测试页面 -->
+                    <div id="tab-testing" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-flask"></i> 模型测试</h2>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5>使用外部测试集评估模型</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> 
+                                    使用 <strong>train_test</strong> 文件作为外部测试集，评估模型在真实新数据上的泛化能力。
+                                    测试集独立于训练过程，结果更加客观。
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>XGBoost</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-xgboost" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-primary w-100 mb-2" onclick="testModel('xgboost')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="log-area" id="test-log-xgboost" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>随机森林</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-random_forest" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-success w-100 mb-2" onclick="testModel('random_forest')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="log-area" id="test-log-random_forest" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>DNN</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-dnn" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-purple w-100 mb-2" onclick="testModel('dnn')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="log-area" id="test-log-dnn" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>Isolation Forest</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-isolation_forest" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-orange w-100 mb-2" onclick="testModel('isolation_forest')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="log-area" id="test-log-isolation_forest" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>AutoEncoder</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-autoencoder" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-teal w-100 mb-2" onclick="testModel('autoencoder')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="log-area" id="test-log-autoencoder" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <button class="btn btn-primary" onclick="loadTestComparison()">
+                                    <i class="fas fa-refresh"></i> 加载测试结果对比
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div id="test-comparison-content">
+                                    <div class="text-center text-muted py-10">
+                                        <i class="fas fa-chart-bar fa-5x mb-4"></i>
+                                        <p>请先测试模型，然后点击上方按钮查看对比结果</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        function showTab(tabId) {
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(pane => {
+                pane.classList.remove('show', 'active');
+            });
+            document.querySelector(`a[href="#${tabId}"]`).classList.add('active');
+            document.getElementById(`tab-${tabId}`).classList.add('show', 'active');
+        }
+
+        function startPreprocessing() {
+            const dataset = document.getElementById('dataset-select').value;
+            document.getElementById('btn-preprocess').disabled = true;
+            document.getElementById('preprocess-status').className = 'status-badge status-running';
+            document.getElementById('preprocess-status').textContent = '处理中';
+            document.getElementById('preprocess-log').innerHTML = '';
+            
+            fetch('/preprocess', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataset: dataset })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        checkPreprocessStatus();
+                    }
+                });
+        }
+
+        function checkPreprocessStatus() {
+            fetch('/preprocess/status')
+                .then(response => response.json())
+                .then(data => {
+                    const logArea = document.getElementById('preprocess-log');
+                    data.messages.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.className = 'log-item';
+                        div.textContent = msg;
+                        logArea.appendChild(div);
+                    });
+                    logArea.scrollTop = logArea.scrollHeight;
+                    
+                    if (data.status === 'running') {
+                        setTimeout(checkPreprocessStatus, 1000);
+                    } else if (data.status === 'completed') {
+                        document.getElementById('preprocess-status').className = 'status-badge status-completed';
+                        document.getElementById('preprocess-status').textContent = '已完成';
+                        document.getElementById('btn-reset-preprocess').disabled = false;
+                    } else if (data.status === 'error') {
+                        document.getElementById('preprocess-status').className = 'status-badge status-error';
+                        document.getElementById('preprocess-status').textContent = '出错';
+                        document.getElementById('btn-reset-preprocess').disabled = false;
+                    }
+                });
+        }
+
+        function resetPreprocessing() {
+            fetch('/reset/status')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('preprocess-status').className = 'status-badge status-idle';
+                    document.getElementById('preprocess-status').textContent = '待处理';
+                    document.getElementById('btn-preprocess').disabled = false;
+                    document.getElementById('btn-reset-preprocess').disabled = true;
+                    document.getElementById('preprocess-log').innerHTML = '<div class="text-muted">点击"开始预处理"按钮运行数据预处理流程...</div>';
+                });
+        }
+
+        function loadDistribution() {
+            const dataset = document.getElementById('dataset-select').value;
+            fetch(`/data/distribution?dataset=${dataset}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        document.getElementById('distribution-content').innerHTML = 
+                            `<div class="alert alert-danger">${data.message}</div>`;
+                        return;
+                    }
+                    
+                    const stats = data.stats;
+                    const content = `
+                        <div class="metrics-grid mb-4">
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.total_samples.toLocaleString()}</div>
+                                <div class="metric-label">总样本数</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.feature_count}</div>
+                                <div class="metric-label">特征数量</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.normal_count.toLocaleString()}</div>
+                                <div class="metric-label">正常流量</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.attack_count.toLocaleString()}</div>
+                                <div class="metric-label">攻击流量</div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-header">标签分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-label"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-header">攻击类别分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-category"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-header">协议类型分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-protocol"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">连接状态分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-flag"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">服务类型 Top 10</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-service"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('distribution-content').innerHTML = content;
+                    
+                    new Chart(document.getElementById('chart-label'), {
+                        type: 'pie',
+                        data: {
+                            labels: ['正常流量', '攻击流量'],
+                            datasets: [{
+                                data: [data.label_distribution.normal, data.label_distribution.attack],
+                                backgroundColor: ['#28a745', '#dc3545']
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
+                    });
+                    
+                    new Chart(document.getElementById('chart-category'), {
+                        type: 'bar',
+                        data: {
+                            labels: Object.keys(data.category_distribution),
+                            datasets: [{
+                                label: '数量',
+                                data: Object.values(data.category_distribution),
+                                backgroundColor: ['#667eea', '#28a745', '#ffc107', '#dc3545', '#17a2b8']
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
+                    });
+                    
+                    const protocolColors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#43e97b'];
+                    new Chart(document.getElementById('chart-protocol'), {
+                        type: 'doughnut',
+                        data: {
+                            labels: Object.keys(data.protocol_distribution),
+                            datasets: [{
+                                data: Object.values(data.protocol_distribution),
+                                backgroundColor: protocolColors.slice(0, Object.keys(data.protocol_distribution).length)
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                    labels: { boxWidth: 12, padding: 8 }
+                                }
+                            }
+                        }
+                    });
+                    
+                    const flagLabels = Object.keys(data.flag_distribution);
+                    const flagValues = Object.values(data.flag_distribution);
+                    new Chart(document.getElementById('chart-flag'), {
+                        type: 'bar',
+                        data: {
+                            labels: flagLabels,
+                            datasets: [{
+                                label: '数量',
+                                data: flagValues,
+                                backgroundColor: '#667eea'
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            indexAxis: 'y',
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                x: { beginAtZero: true }
+                            }
+                        }
+                    });
+                    
+                    const serviceLabels = Object.keys(data.service_top10);
+                    const serviceValues = Object.values(data.service_top10);
+                    new Chart(document.getElementById('chart-service'), {
+                        type: 'bar',
+                        data: {
+                            labels: serviceLabels,
+                            datasets: [{
+                                label: '数量',
+                                data: serviceValues,
+                                backgroundColor: '#764ba2'
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            indexAxis: 'y',
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                x: { beginAtZero: true }
+                            }
+                        }
+                    });
+                });
+        }
+
+        function trainModel(modelName) {
+            const btn = document.getElementById(`btn-${modelName}`);
+            const status = document.getElementById(`status-${modelName}`);
+            const logArea = document.getElementById(`log-${modelName}`);
+            
+            btn.disabled = true;
+            status.className = 'status-badge status-running';
+            status.textContent = '训练中';
+            logArea.innerHTML = '';
+            
+            fetch('/train/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_name: modelName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    checkTrainStatus(modelName);
+                }
+            });
+        }
+
+        function checkTrainStatus(modelName) {
+            fetch(`/train/status/${modelName}`)
+                .then(response => response.json())
+                .then(data => {
+                    const logArea = document.getElementById(`log-${modelName}`);
+                    const status = document.getElementById(`status-${modelName}`);
+                    const btn = document.getElementById(`btn-${modelName}`);
+                    
+                    data.messages.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.className = 'log-item';
+                        div.textContent = msg;
+                        logArea.appendChild(div);
+                    });
+                    logArea.scrollTop = logArea.scrollHeight;
+                    
+                    if (data.status === 'running') {
+                        setTimeout(() => checkTrainStatus(modelName), 1000);
+                    } else if (data.status === 'completed') {
+                        status.className = 'status-badge status-completed';
+                        status.textContent = '已完成';
+                        btn.textContent = '重新训练';
+                        btn.disabled = false;
+                    } else if (data.status === 'error') {
+                        status.className = 'status-badge status-error';
+                        status.textContent = '出错';
+                        btn.disabled = false;
+                    }
+                });
+        }
+
+        function loadComparison() {
+            fetch('/results/compare')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        document.getElementById('comparison-content').innerHTML = 
+                            `<div class="alert alert-danger">${data.message}</div>`;
+                        return;
+                    }
+                    
+                    const results = data.results;
+                    const content = `
+                        <div class="metrics-grid mb-4">
+                            ${Object.keys(results).map(name => `
+                                <div class="metric-card">
+                                    <div class="metric-value">${(results[name].accuracy * 100).toFixed(2)}%</div>
+                                    <div class="metric-label">${getModelName(name)} 准确率</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">准确率对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-accuracy"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">F1-Score 对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-f1"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">AUC 对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-auc"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">训练时间对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-time"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-md-12">
+                                <div class="card">
+                                    <div class="card-header">详细指标对比</div>
+                                    <div class="card-body">
+                                        <table class="table table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>模型</th>
+                                                    <th>准确率</th>
+                                                    <th>精确率</th>
+                                                    <th>召回率</th>
+                                                    <th>F1-Score</th>
+                                                    <th>AUC</th>
+                                                    <th>训练时间</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${Object.keys(results).map(name => `
+                                                    <tr>
+                                                        <td>${getModelName(name)}</td>
+                                                        <td>${(results[name].accuracy * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].precision * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].recall * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].f1 * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].auc * 100).toFixed(2)}%</td>
+                                                        <td>${results[name].train_time.toFixed(2)}s</td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('comparison-content').innerHTML = content;
+                    
+                    const names = Object.keys(results).map(n => getModelName(n));
+                    const colors = ['#667eea', '#28a745', '#9b59b6', '#f59e0b'];
+                    
+                    new Chart(document.getElementById('chart-accuracy'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: '准确率',
+                                data: Object.values(results).map(r => r.accuracy),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+                    });
+                    
+                    new Chart(document.getElementById('chart-f1'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: 'F1-Score',
+                                data: Object.values(results).map(r => r.f1),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+                    });
+                    
+                    new Chart(document.getElementById('chart-auc'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: 'AUC',
+                                data: Object.values(results).map(r => r.auc),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+                    });
+                    
+                    new Chart(document.getElementById('chart-time'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: '训练时间 (秒)',
+                                data: Object.values(results).map(r => r.train_time),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+                    });
+                });
+        }
+
+        function getModelName(name) {
+            const map = {
+                'xgboost': 'XGBoost',
+                'random_forest': '随机森林',
+                'dnn': 'DNN',
+                'isolation_forest': 'Isolation Forest'
+            };
+            return map[name] || name;
+        }
+
+        function loadFeatureImportance(modelName) {
+            fetch(`/features/importance/${modelName}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        document.getElementById('feature-importance-content').innerHTML = 
+                            `<div class="alert alert-danger">${data.message}</div>`;
+                        return;
+                    }
+                    
+                    const features = data.features;
+                    const content = `
+                        <div class="card">
+                            <div class="card-header">${getModelName(modelName)} 特征重要性 Top 20</div>
+                            <div class="card-body">
+                                <canvas id="chart-feature-importance"></canvas>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('feature-importance-content').innerHTML = content;
+                    
+                    new Chart(document.getElementById('chart-feature-importance'), {
+                        type: 'bar',
+                        data: {
+                            labels: features.map(f => f.feature),
+                            datasets: [{
+                                label: '重要性',
+                                data: features.map(f => f.importance),
+                                backgroundColor: '#667eea'
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            indexAxis: 'y',
+                            scales: { x: { beginAtZero: true } }
+                        }
+                    });
+                });
+        }
+
+        function testModel(modelName) {
+            const status = document.getElementById(`test-status-${modelName}`);
+            const logArea = document.getElementById(`test-log-${modelName}`);
+            
+            status.className = 'status-badge status-running';
+            status.textContent = '测试中';
+            logArea.innerHTML = '';
+            
+            fetch('/test/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_name: modelName, test_file: 'train_test' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    checkTestStatus(modelName);
+                }
+            });
+        }
+
+        function checkTestStatus(modelName) {
+            fetch(`/test/status/${modelName}`)
+                .then(response => response.json())
+                .then(data => {
+                    const logArea = document.getElementById(`test-log-${modelName}`);
+                    const status = document.getElementById(`test-status-${modelName}`);
+                    
+                    data.messages.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.className = 'log-item';
+                        div.textContent = msg;
+                        logArea.appendChild(div);
+                    });
+                    logArea.scrollTop = logArea.scrollHeight;
+                    
+                    if (data.status === 'running') {
+                        setTimeout(() => checkTestStatus(modelName), 1000);
+                    } else if (data.status === 'completed') {
+                        status.className = 'status-badge status-completed';
+                        status.textContent = '已完成';
+                    } else if (data.status === 'error') {
+                        status.className = 'status-badge status-error';
+                        status.textContent = '出错';
+                    }
+                });
+        }
+
+        function loadTestComparison() {
+            const models = ['xgboost', 'random_forest', 'dnn', 'isolation_forest'];
+            let results = {};
+            let completed = 0;
+            
+            models.forEach(modelName => {
+                fetch(`/test/results/${modelName}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            results[modelName] = data.results;
+                        }
+                        completed++;
+                        
+                        if (completed === models.length) {
+                            renderTestComparison(results);
+                        }
+                    });
+            });
+        }
+
+        function renderTestComparison(results) {
+            if (Object.keys(results).length === 0) {
+                document.getElementById('test-comparison-content').innerHTML = 
+                    `<div class="alert alert-warning">没有找到测试结果，请先测试模型</div>`;
+                return;
+            }
+            
+            const content = `
+                <div class="metrics-grid mb-4">
+                    ${Object.keys(results).map(name => `
+                        <div class="metric-card">
+                            <div class="metric-value">${(results[name].accuracy * 100).toFixed(2)}%</div>
+                            <div class="metric-label">${getModelName(name)} 测试准确率</div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">测试集准确率对比</div>
+                            <div class="card-body">
+                                <canvas id="chart-test-accuracy"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">测试集F1-Score对比</div>
+                            <div class="card-body">
+                                <canvas id="chart-test-f1"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header">详细测试结果对比</div>
+                            <div class="card-body">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>模型</th>
+                                            <th>准确率</th>
+                                            <th>精确率</th>
+                                            <th>召回率</th>
+                                            <th>F1-Score</th>
+                                            <th>AUC</th>
+                                            <th>测试样本数</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${Object.keys(results).map(name => `
+                                            <tr>
+                                                <td>${getModelName(name)}</td>
+                                                <td>${(results[name].accuracy * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].precision * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].recall * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].f1 * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].auc * 100).toFixed(2)}%</td>
+                                                <td>${results[name].test_samples.toLocaleString()}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('test-comparison-content').innerHTML = content;
+            
+            const names = Object.keys(results).map(n => getModelName(n));
+            const colors = ['#667eea', '#28a745', '#9b59b6', '#f59e0b'];
+            
+            new Chart(document.getElementById('chart-test-accuracy'), {
+                type: 'bar',
+                data: {
+                    labels: names,
+                    datasets: [{
+                        label: '测试集准确率',
+                        data: Object.values(results).map(r => r.accuracy),
+                        backgroundColor: colors
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+            });
+            
+            new Chart(document.getElementById('chart-test-f1'), {
+                type: 'bar',
+                data: {
+                    labels: names,
+                    datasets: [{
+                        label: '测试集F1-Score',
+                        data: Object.values(results).map(r => r.f1),
+                        backgroundColor: colors
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+            });
+        }
+    </script>
+</body>
+</html>
