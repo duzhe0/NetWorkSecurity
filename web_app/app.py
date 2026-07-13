@@ -282,7 +282,7 @@ def preprocess():
             if dataset == 'small':
                 train_file = os.path.join(PROJECT_ROOT, 'KDDTrain+_20Percent.txt')
             elif dataset == 'train_test':
-                train_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'train_test')
+                train_file = os.path.join(PROJECT_ROOT, 'train_test')
             else:
                 train_file = os.path.join(PROJECT_ROOT, 'KDDTrain+.txt')
 
@@ -472,7 +472,14 @@ def preprocess():
             if balance_method != 'none' and IMBLEARN_AVAILABLE:
                 add_msg('preprocessing', f'\n[1.10] 类不平衡处理: {balance_method}')
                 if balance_method == 'smote':
-                    sampler = SMOTE(random_state=42, k_neighbors=min(5, min(np.bincount(y_train)) - 1))
+                    min_count = int(np.bincount(y_train).min())
+                    if min_count <= 2:
+                        add_msg('preprocessing', f'  最小样本数={min_count}，SMOTE无法工作，改用随机过采样')
+                        sampler = RandomOverSampler(random_state=42)
+                    else:
+                        k = min(5, min_count - 1)
+                        sampler = SMOTE(random_state=42, k_neighbors=k)
+                        add_msg('preprocessing', f'  SMOTE k_neighbors={k}')
                 elif balance_method == 'oversample':
                     sampler = RandomOverSampler(random_state=42)
                 elif balance_method == 'undersample':
@@ -551,39 +558,80 @@ def preprocess_status():
     })
 
 
-def build_dnn_model(input_shape, num_classes, model_type='improved', dropout_rate=0.3, learning_rate=0.001):
-    """构建DNN模型"""
+def build_dnn_model(input_shape, num_classes, model_type='improved', dropout_rate=0.4, learning_rate=0.001):
+    """构建DNN模型 - 优化版：Focal Loss + Cosine Decay + 更深网络"""
+    from tensorflow.keras.regularizers import l2
+    from tensorflow.keras.layers import LeakyReLU, Add
+
     if model_type == 'improved':
+        # 残差连接的深层网络
         inputs = Input(shape=input_shape)
-        x = Dense(256, activation='relu')(inputs)
+        x = Dense(512, kernel_regularizer=l2(1e-5))(inputs)
         x = BatchNormalization()(x)
+        x = LeakyReLU(alpha=0.1)(x)
         x = Dropout(dropout_rate)(x)
-        x = Dense(128, activation='relu')(x)
+
+        # Block 1
+        shortcut = Dense(256)(x)
+        x = Dense(256, kernel_regularizer=l2(1e-5))(x)
         x = BatchNormalization()(x)
-        x = Dropout(dropout_rate)(x)
-        x = Dense(64, activation='relu')(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = Dropout(dropout_rate * 0.8)(x)
+        x = Dense(256, kernel_regularizer=l2(1e-5))(x)
         x = BatchNormalization()(x)
-        x = Dropout(dropout_rate)(x)
-        x = Dense(32, activation='relu')(x)
+        x = Add()([x, shortcut])
+        x = LeakyReLU(alpha=0.1)(x)
+
+        # Block 2
+        shortcut = Dense(128)(x)
+        x = Dense(128, kernel_regularizer=l2(1e-5))(x)
         x = BatchNormalization()(x)
-        x = Dropout(dropout_rate)(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = Dropout(dropout_rate * 0.6)(x)
+        x = Dense(128, kernel_regularizer=l2(1e-5))(x)
+        x = BatchNormalization()(x)
+        x = Add()([x, shortcut])
+        x = LeakyReLU(alpha=0.1)(x)
+
+        x = Dense(64, kernel_regularizer=l2(1e-5))(x)
+        x = BatchNormalization()(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = Dropout(dropout_rate * 0.5)(x)
+
         outputs = Dense(num_classes, activation='softmax')(x)
         model = Model(inputs=inputs, outputs=outputs)
     else:
         model = Sequential([
-            Dense(128, activation='relu', input_shape=input_shape),
+            Dense(512, input_shape=input_shape, kernel_regularizer=l2(1e-5)),
             BatchNormalization(),
+            LeakyReLU(alpha=0.1),
             Dropout(dropout_rate),
-            Dense(64, activation='relu'),
+            Dense(256, kernel_regularizer=l2(1e-5)),
             BatchNormalization(),
+            LeakyReLU(alpha=0.1),
             Dropout(dropout_rate),
-            Dense(32, activation='relu'),
+            Dense(128, kernel_regularizer=l2(1e-5)),
             BatchNormalization(),
+            LeakyReLU(alpha=0.1),
             Dropout(dropout_rate),
+            Dense(64, kernel_regularizer=l2(1e-5)),
+            BatchNormalization(),
+            LeakyReLU(alpha=0.1),
+            Dropout(dropout_rate),
+            Dense(32, kernel_regularizer=l2(1e-5)),
+            BatchNormalization(),
+            LeakyReLU(alpha=0.1),
             Dense(num_classes, activation='softmax')
         ])
 
-    model.compile(optimizer=Adam(learning_rate=learning_rate),
+    # 使用 Cosine Decay 学习率调度
+    from tensorflow.keras.optimizers.schedules import CosineDecay
+    lr_schedule = CosineDecay(
+        initial_learning_rate=learning_rate,
+        decay_steps=3000
+    )
+
+    model.compile(optimizer=Adam(learning_rate=lr_schedule),
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
     return model
@@ -601,8 +649,8 @@ def train():
 
     data = request.json or {}
     model_type = data.get('model_type', 'improved_dnn')
-    epochs = int(data.get('epochs', 30))
-    batch_size = int(data.get('batch_size', 256))
+    epochs = int(data.get('epochs', 100))
+    batch_size = int(data.get('batch_size', 128))
     dropout_rate = float(data.get('dropout_rate', 0.3))
     learning_rate = float(data.get('learning_rate', 0.001))
     use_class_weights = data.get('use_class_weights', True)
@@ -628,8 +676,8 @@ def train():
                 model.summary(print_fn=lambda x: add_msg('training', x))
 
                 callbacks = [
-                    EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True, verbose=1),
-                    ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
+                    EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True, verbose=1),
+                    ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=8, min_lr=1e-6, verbose=1)
                 ]
 
                 class_w = _state['class_weights'] if use_class_weights else None
