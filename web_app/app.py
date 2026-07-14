@@ -447,7 +447,7 @@ def train_model():
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
                 
             elif model_name == 'dnn':
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
                 add_message(model_name, f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
@@ -494,7 +494,7 @@ def train_model():
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
             
             elif model_name == 'cnn1d':
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
                 add_message(model_name, f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
@@ -539,7 +539,7 @@ def train_model():
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
 
             elif model_name == 'transformer':
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
                 add_message(model_name, f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
@@ -935,7 +935,7 @@ def test_model():
             from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
             
             if model_name in ('dnn', 'cnn1d', 'transformer'):
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
                 state_dict = torch.load(model_path, map_location=device)
 
                 if model_name == 'dnn':
