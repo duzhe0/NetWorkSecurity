@@ -1,0 +1,13 @@
+# 网络入侵检测系统依赖（与 .venv 的 Python 3.11 + uv 配合使用）
+# 安装： uv pip install -r requirements.txt
+# 注：XGBoost 在 macOS 上需要 Homebrew 的 libomp（brew install libomp）
+
+pandas
+numpy
+scikit-learn
+xgboost
+torch
+flask
+matplotlib
+seaborn
+joblib
