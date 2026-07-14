@@ -379,19 +379,19 @@
                                     <div class="card-header">
                                         <div class="row align-items-center">
                                             <div class="col-8">
-                                                <h5>Isolation Forest</h5>
+                                                <h5>1D-CNN</h5>
                                             </div>
                                             <div class="col-4">
-                                                <span id="status-isolation_forest" class="status-badge status-idle">待训练</span>
+                                                <span id="status-cnn1d" class="status-badge status-idle">待训练</span>
                                             </div>
                                         </div>
                                     </div>
                                     <div class="card-body">
-                                        <p class="text-sm text-muted mb-3">异常检测模型，无监督学习，对未知攻击类型有较好泛化能力</p>
-                                        <button id="btn-isolation_forest" class="btn btn-orange w-100 mb-2" onclick="trainModel('isolation_forest')">
+                                        <p class="text-sm text-muted mb-3">一维卷积神经网络，擅长捕获局部特征模式，适合序列化特征</p>
+                                        <button id="btn-cnn1d" class="btn btn-orange w-100 mb-2" onclick="trainModel('cnn1d')">
                                             <i class="fas fa-play"></i> 开始训练
                                         </button>
-                                        <div class="log-area" id="log-isolation_forest">
+                                        <div class="log-area" id="log-cnn1d">
                                             <div class="text-muted">等待训练...</div>
                                         </div>
                                     </div>
@@ -403,19 +403,19 @@
                                     <div class="card-header">
                                         <div class="row align-items-center">
                                             <div class="col-8">
-                                                <h5>AutoEncoder</h5>
+                                                <h5>Transformer</h5>
                                             </div>
                                             <div class="col-4">
-                                                <span id="status-autoencoder" class="status-badge status-idle">待训练</span>
+                                                <span id="status-transformer" class="status-badge status-idle">待训练</span>
                                             </div>
                                         </div>
                                     </div>
                                     <div class="card-body">
-                                        <p class="text-sm text-muted mb-3">深度学习异常检测，仅在正常流量上训练，重构误差大则为异常</p>
-                                        <button id="btn-autoencoder" class="btn btn-teal w-100 mb-2" onclick="trainModel('autoencoder')">
+                                        <p class="text-sm text-muted mb-3">基于自注意力机制的模型，能捕获特征间全局依赖关系</p>
+                                        <button id="btn-transformer" class="btn btn-teal w-100 mb-2" onclick="trainModel('transformer')">
                                             <i class="fas fa-play"></i> 开始训练
                                         </button>
-                                        <div class="log-area" id="log-autoencoder">
+                                        <div class="log-area" id="log-transformer">
                                             <div class="text-muted">等待训练...</div>
                                         </div>
                                     </div>
@@ -448,21 +448,21 @@
                                         </ul>
                                     </div>
                                     <div class="col-md-3">
-                                        <h6>Isolation Forest 参数</h6>
+                                        <h6>1D-CNN 参数</h6>
                                         <ul class="text-sm">
-                                            <li>n_estimators: 500</li>
-                                            <li>max_samples: 256</li>
-                                            <li>contamination: 0.05</li>
-                                            <li>无监督学习，仅用正常流量</li>
+                                            <li>卷积通道: 64 → 128 → 256</li>
+                                            <li>kernel_size: 3</li>
+                                            <li>Dropout: 0.3</li>
+                                            <li>全局平均池化 + 全连接分类</li>
                                         </ul>
                                     </div>
                                     <div class="col-md-3">
-                                        <h6>AutoEncoder 参数</h6>
+                                        <h6>Transformer 参数</h6>
                                         <ul class="text-sm">
-                                            <li>隐藏层: 256 → 128 → 64</li>
-                                            <li>Dropout: 0.2</li>
-                                            <li>学习率: 0.001</li>
-                                            <li>无监督学习，重构误差检测</li>
+                                            <li>d_model: 64, nhead: 4</li>
+                                            <li>层数: 2, FFN: 128</li>
+                                            <li>Dropout: 0.1</li>
+                                            <li>每特征作为 token，自注意力</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -502,7 +502,7 @@
                                     </div>
                                     <div class="col-md-6">
                                         <button class="btn btn-secondary w-100" disabled>
-                                            DNN / Isolation Forest / AutoEncoder（不支持）
+                                            DNN / 1D-CNN / Transformer（不支持）
                                         </button>
                                     </div>
                                 </div>
@@ -575,38 +575,38 @@
                                         <div class="card">
                                             <div class="card-header">
                                                 <div class="row align-items-center">
-                                                    <div class="col-8"><h6>Isolation Forest</h6></div>
+                                                    <div class="col-8"><h6>1D-CNN</h6></div>
                                                     <div class="col-4">
-                                                        <span id="test-status-isolation_forest" class="status-badge status-idle">待测试</span>
+                                                        <span id="test-status-cnn1d" class="status-badge status-idle">待测试</span>
                                                     </div>
                                                 </div>
                                             </div>
                                             <div class="card-body">
-                                                <button class="btn btn-orange w-100 mb-2" onclick="testModel('isolation_forest')">
+                                                <button class="btn btn-orange w-100 mb-2" onclick="testModel('cnn1d')">
                                                     <i class="fas fa-play"></i> 开始测试
                                                 </button>
-                                                <div class="log-area" id="test-log-isolation_forest" style="height:200px">
+                                                <div class="log-area" id="test-log-cnn1d" style="height:200px">
                                                     <div class="text-muted">等待测试...</div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <div class="col-md-4">
                                         <div class="card">
                                             <div class="card-header">
                                                 <div class="row align-items-center">
-                                                    <div class="col-8"><h6>AutoEncoder</h6></div>
+                                                    <div class="col-8"><h6>Transformer</h6></div>
                                                     <div class="col-4">
-                                                        <span id="test-status-autoencoder" class="status-badge status-idle">待测试</span>
+                                                        <span id="test-status-transformer" class="status-badge status-idle">待测试</span>
                                                     </div>
                                                 </div>
                                             </div>
                                             <div class="card-body">
-                                                <button class="btn btn-teal w-100 mb-2" onclick="testModel('autoencoder')">
+                                                <button class="btn btn-teal w-100 mb-2" onclick="testModel('transformer')">
                                                     <i class="fas fa-play"></i> 开始测试
                                                 </button>
-                                                <div class="log-area" id="test-log-autoencoder" style="height:200px">
+                                                <div class="log-area" id="test-log-transformer" style="height:200px">
                                                     <div class="text-muted">等待测试...</div>
                                                 </div>
                                             </div>
@@ -1101,8 +1101,8 @@
             const map = {
                 'xgboost': 'XGBoost',
                 'dnn': 'DNN',
-                'isolation_forest': 'Isolation Forest',
-                'autoencoder': 'AutoEncoder'
+                'cnn1d': '1D-CNN',
+                'transformer': 'Transformer'
             };
             return map[name] || name;
         }
@@ -1198,7 +1198,7 @@
         }
 
         function loadTestComparison() {
-            const models = ['xgboost', 'dnn', 'isolation_forest', 'autoencoder'];
+            const models = ['xgboost', 'dnn', 'cnn1d', 'transformer'];
             let results = {};
             let completed = 0;
             
