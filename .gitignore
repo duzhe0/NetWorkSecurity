@@ -5,6 +5,12 @@ models/dnn/model_dnn.pth
 models/dnn/*.csv
 models/xgboost/*.pkl
 models/xgboost/*.csv
+models/cnn1d/*.pth
+models/cnn1d/*.csv
+models/cnn1d/*.png
+models/transformer/*.pth
+models/transformer/*.csv
+models/transformer/*.png
 Train/encoder_multiclass_23_classes.txt
 Train/encoder_multiclass_23.pkl
 Train/encoder_onehot.pkl
