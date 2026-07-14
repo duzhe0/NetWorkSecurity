@@ -360,6 +360,14 @@
 
                     <div id="tab-training" class="tab-pane fade">
                         <h2 class="mt-4 mb-4"><i class="fas fa-cogs"></i> 模型训练</h2>
+                        <div class="mb-4">
+                            <label class="form-label"><strong>分类粒度</strong></label>
+                            <select id="train-granularity" class="form-select" style="max-width: 320px;">
+                                <option value="23" selected>23 细分类（normal + 22 种攻击）</option>
+                                <option value="5">5 大类（normal / dos / probe / r2l / u2r）</option>
+                            </select>
+                            <div class="form-text text-muted"><i class="fas fa-info-circle"></i> 切换粒度后点训练按钮；5 类与 23 类模型并存，互不覆盖</div>
+                        </div>
                         
                         <div class="row">
                             <div class="col-md-4">
@@ -524,6 +532,14 @@
 
                     <div id="tab-results" class="tab-pane fade">
                         <h2 class="mt-4 mb-4"><i class="fas fa-bar-chart"></i> 结果对比</h2>
+                        <div class="mb-4">
+                            <label class="form-label"><strong>分类粒度</strong></label>
+                            <select id="comparison-granularity" class="form-select" style="max-width: 320px;" onchange="loadComparison(); loadTestComparison();">
+                                <option value="23" selected>23 细分类</option>
+                                <option value="5">5 大类</option>
+                            </select>
+                            <div class="form-text text-muted"><i class="fas fa-info-circle"></i> 切换粒度查看对应分类任务的对比结果</div>
+                        </div>
                         
                         <div class="card mb-4">
                             <div class="card-header">
@@ -568,6 +584,14 @@
                     <!-- 模型测试页面 -->
                     <div id="tab-testing" class="tab-pane fade">
                         <h2 class="mt-4 mb-4"><i class="fas fa-flask"></i> 模型测试</h2>
+                        <div class="mb-4">
+                            <label class="form-label"><strong>分类粒度</strong></label>
+                            <select id="test-granularity" class="form-select" style="max-width: 320px;">
+                                <option value="23" selected>23 细分类（normal + 22 种攻击）</option>
+                                <option value="5">5 大类（normal / dos / probe / r2l / u2r）</option>
+                            </select>
+                            <div class="form-text text-muted"><i class="fas fa-info-circle"></i> 选择与训练时一致的粒度进行测试</div>
+                        </div>
                         
                         <div class="card mb-4">
                             <div class="card-header">
@@ -972,6 +996,7 @@
             const btn = document.getElementById(`btn-${modelName}`);
             const status = document.getElementById(`status-${modelName}`);
             const logArea = document.getElementById(`log-${modelName}`);
+            const granularity = document.getElementById('train-granularity')?.value || '23';
             
             btn.disabled = true;
             status.className = 'status-badge status-running';
@@ -981,18 +1006,18 @@
             fetch('/train/model', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model_name: modelName })
+                body: JSON.stringify({ model_name: modelName, granularity: granularity })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'started') {
-                    checkTrainStatus(modelName);
+                    checkTrainStatus(modelName, granularity);
                 }
             });
         }
 
-        function checkTrainStatus(modelName) {
-            fetch(`/train/status/${modelName}`)
+        function checkTrainStatus(modelName, granularity) {
+            fetch(`/train/status/${modelName}?granularity=${granularity}`)
                 .then(response => response.json())
                 .then(data => {
                     const logArea = document.getElementById(`log-${modelName}`);
@@ -1009,7 +1034,7 @@
                     setProgress(`prog-fill-${modelName}`, `prog-text-${modelName}`, data.progress || 0);
 
                     if (data.status === 'running') {
-                        setTimeout(() => checkTrainStatus(modelName), 1000);
+                        setTimeout(() => checkTrainStatus(modelName, granularity), 1000);
                     } else if (data.status === 'completed') {
                         status.className = 'status-badge status-completed';
                         status.textContent = '已完成';
@@ -1025,7 +1050,8 @@
         }
 
         function loadComparison() {
-            fetch('/results/compare')
+            const granularity = document.getElementById('comparison-granularity')?.value || '23';
+            fetch(`/results/compare?granularity=${granularity}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'error') {
@@ -1190,7 +1216,8 @@
         }
 
         function loadFeatureImportance(modelName) {
-            fetch(`/features/importance/${modelName}`)
+            const granularity = document.getElementById('comparison-granularity')?.value || '23';
+            fetch(`/features/importance/${modelName}?granularity=${granularity}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'error') {
@@ -1234,6 +1261,7 @@
         function testModel(modelName) {
             const status = document.getElementById(`test-status-${modelName}`);
             const logArea = document.getElementById(`test-log-${modelName}`);
+            const granularity = document.getElementById('test-granularity')?.value || '23';
             
             status.className = 'status-badge status-running';
             status.textContent = '测试中';
@@ -1242,18 +1270,18 @@
             fetch('/test/model', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model_name: modelName, test_file: 'train_test' })
+                body: JSON.stringify({ model_name: modelName, test_file: 'train_test', granularity: granularity })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'started') {
-                    checkTestStatus(modelName);
+                    checkTestStatus(modelName, granularity);
                 }
             });
         }
 
-        function checkTestStatus(modelName) {
-            fetch(`/test/status/${modelName}`)
+        function checkTestStatus(modelName, granularity) {
+            fetch(`/test/status/${modelName}?granularity=${granularity}`)
                 .then(response => response.json())
                 .then(data => {
                     const logArea = document.getElementById(`test-log-${modelName}`);
@@ -1269,7 +1297,7 @@
                     setProgress(`tprog-fill-${modelName}`, `tprog-text-${modelName}`, data.progress || 0);
 
                     if (data.status === 'running') {
-                        setTimeout(() => checkTestStatus(modelName), 1000);
+                        setTimeout(() => checkTestStatus(modelName, granularity), 1000);
                     } else if (data.status === 'completed') {
                         status.className = 'status-badge status-completed';
                         status.textContent = '已完成';
@@ -1283,11 +1311,12 @@
 
         function loadTestComparison() {
             const models = ['xgboost', 'dnn', 'cnn1d', 'transformer'];
+            const granularity = document.getElementById('comparison-granularity')?.value || '23';
             let results = {};
             let completed = 0;
             
             models.forEach(modelName => {
-                fetch(`/test/results/${modelName}`)
+                fetch(`/test/results/${modelName}?granularity=${granularity}`)
                     .then(response => response.json())
                     .then(data => {
                         if (data.status === 'success') {

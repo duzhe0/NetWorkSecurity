@@ -110,32 +110,18 @@ class TransformerMultiClass(nn.Module):
         return self.classifier(x)
 
 
-training_status = {
-    'xgboost': 'idle',
-    'dnn': 'idle',
-    'cnn1d': 'idle',
-    'transformer': 'idle',
-    'preprocessing': 'idle',
-    'test_xgboost': 'idle',
-    'test_dnn': 'idle',
-    'test_cnn1d': 'idle',
-    'test_transformer': 'idle'
-}
+# 模型基础名与分类粒度：状态键按 {base}_{granularity} 命名空间隔离，5 类/23 类并存
+_BASE_MODELS = ['xgboost', 'dnn', 'cnn1d', 'transformer']
+_GRANULARITIES = ['5', '23']
+_STATUS_KEYS = ([f'{b}_{g}' for b in _BASE_MODELS for g in _GRANULARITIES] +
+                ['preprocessing'] +
+                [f'test_{b}_{g}' for b in _BASE_MODELS for g in _GRANULARITIES])
 
-training_messages = {
-    'xgboost': [],
-    'dnn': [],
-    'cnn1d': [],
-    'transformer': [],
-    'preprocessing': [],
-    'test_xgboost': [],
-    'test_dnn': [],
-    'test_cnn1d': [],
-    'test_transformer': []
-}
+training_status = {k: 'idle' for k in _STATUS_KEYS}
+training_messages = {k: [] for k in _STATUS_KEYS}
 
 # 进度追踪（0-100 整数），前端进度条据此更新
-training_progress = {k: 0 for k in training_status}
+training_progress = {k: 0 for k in _STATUS_KEYS}
 
 def add_message(task, msg):
     if task in training_messages:
@@ -221,6 +207,12 @@ def preprocess_data():
             class_list_path = os.path.join(output_dir, 'encoder_multiclass_23_classes.txt')
             with open(class_list_path, 'w') as f:
                 for c in le_multiclass.classes_:
+                    f.write(c + '\n')
+            # 保存 5 大类标签编码器（供 5 分类任务推理映射）
+            joblib.dump(le_category, os.path.join(output_dir, 'encoder_category_5.pkl'))
+            class_list_path_5 = os.path.join(output_dir, 'encoder_category_5_classes.txt')
+            with open(class_list_path_5, 'w') as f:
+                for c in le_category.classes_:
                     f.write(c + '\n')
             update_progress('preprocessing', 95)
 
@@ -325,21 +317,25 @@ def get_data_distribution():
 @app.route('/train/model', methods=['POST'])
 def train_model():
     model_name = request.json.get('model_name')
+    granularity = request.json.get('granularity', '23')
+    if granularity not in ('5', '23'):
+        return jsonify({'status': 'error', 'message': '无效的分类粒度，仅支持 5 或 23'})
+    task_key = f'{model_name}_{granularity}'
 
     if model_name not in ['xgboost', 'dnn', 'cnn1d', 'transformer']:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
-    
-    if training_status[model_name] == 'running':
-        return jsonify({'status': 'error', 'message': f'{model_name} 正在训练中'})
-    
-    training_status[model_name] = 'running'
-    training_messages[model_name] = []
-    training_progress[model_name] = 0
+
+    if training_status[task_key] == 'running':
+        return jsonify({'status': 'error', 'message': f'{model_name}({granularity}类) 正在训练中'})
+
+    training_status[task_key] = 'running'
+    training_messages[task_key] = []
+    training_progress[task_key] = 0
 
     def run_training():
         try:
-            add_message(model_name, f'开始训练 {model_name} 模型（防数据泄漏版本）...')
-            update_progress(model_name, 3)
+            add_message(task_key,f'开始训练 {model_name} 模型（防数据泄漏版本）...')
+            update_progress(task_key, 3)
 
             import warnings
             warnings.filterwarnings('ignore')
@@ -353,9 +349,9 @@ def train_model():
             
             for p in [train_path, val_path, test_path]:
                 if not os.path.exists(p):
-                    add_message(model_name, f'错误: 数据文件不存在: {p}')
-                    add_message(model_name, '请先运行数据预处理')
-                    training_status[model_name] = 'error'
+                    add_message(task_key,f'错误: 数据文件不存在: {p}')
+                    add_message(task_key,'请先运行数据预处理')
+                    training_status[task_key] ='error'
                     return
             
             # 加载训练集、验证集、测试集（预处理时已正确划分）
@@ -368,34 +364,49 @@ def train_model():
                             'label_multiclass', 'label_multiclass_encoded']
             feature_cols = [col for col in df_train.columns if col not in exclude_cols]
 
+            # 按分类粒度选标签列：5 类用 label_category_encoded，23 类用 label_multiclass_encoded
+            label_col = 'label_category_encoded' if granularity == '5' else 'label_multiclass_encoded'
             X_train = df_train[feature_cols].values.astype(np.float32)
-            y_train = df_train['label_multiclass_encoded'].values.astype(np.int64)
+            y_train = df_train[label_col].values.astype(np.int64)
             X_val = df_val[feature_cols].values.astype(np.float32)
-            y_val = df_val['label_multiclass_encoded'].values.astype(np.int64)
+            y_val = df_val[label_col].values.astype(np.int64)
             X_test = df_test[feature_cols].values.astype(np.float32)
-            y_test = df_test['label_multiclass_encoded'].values.astype(np.int64)
+            y_test = df_test[label_col].values.astype(np.int64)
 
             # 加载类别列表获取真正的类别总数（跨 sklearn 版本兼容）
-            encoder_class_path = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
+            if granularity == '5':
+                encoder_class_path = os.path.join(base_dir, 'Train', 'encoder_category_5_classes.txt')
+            else:
+                encoder_class_path = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
             if os.path.exists(encoder_class_path):
                 with open(encoder_class_path, 'r') as f:
                     class_names = [line.strip() for line in f if line.strip()]
                 num_classes = len(class_names)
                 normal_idx = class_names.index('normal') if 'normal' in class_names else 0
             else:
-                num_classes = int(max(y_train.max(), y_val.max(), y_test.max()) + 1)
-                normal_idx = 0
+                # 5 类编码器不存在时，从预处理 CSV 的 label_category 列动态构建（兼容旧产物）
+                if granularity == '5':
+                    class_names = sorted(df_train['label_category'].dropna().unique().tolist())
+                    num_classes = len(class_names)
+                    normal_idx = class_names.index('normal') if 'normal' in class_names else 0
+                    add_message(task_key, f'未找到 5 类编码器，从训练集动态构建类别: {class_names}')
+                else:
+                    num_classes = int(max(y_train.max(), y_val.max(), y_test.max()) + 1)
+                    normal_idx = 0
 
             # XGBoost 必须用数据中实际出现的不重复类别数（标签必须0..N-1 连续无空隙）
             xgb_num_class = len(np.unique(y_train))
             if xgb_num_class != num_classes:
-                add_message(model_name, f'警告: 数据有空隙，实际 {xgb_num_class} 个不重复标签（全部 {num_classes} 个类别）')
+                add_message(task_key, f'警告: 数据有空隙，实际 {xgb_num_class} 个不重复标签（全部 {num_classes} 个类别）')
 
-            add_message(model_name, f'【23 分类任务】共 {num_classes} 个类别 (normal + {num_classes - 1} 种攻击)')
-            add_message(model_name, f'数据加载完成: 训练集 {len(X_train)}, 验证集 {len(X_val)}, 测试集 {len(X_test)}')
-            add_message(model_name, f'特征数量: {len(feature_cols)}')
-            add_message(model_name, f'验证集用于训练监控，测试集锁死至最终评估')
-            update_progress(model_name, 8)
+            task_label = '5 大类' if granularity == '5' else '23 细分类'
+            add_message(task_key, f'【{task_label}任务】共 {num_classes} 个类别')
+            if granularity == '5':
+                add_message(task_key, f'  类别: {class_names}')
+            add_message(task_key, f'数据加载完成: 训练集 {len(X_train)}, 验证集 {len(X_val)}, 测试集 {len(X_test)}')
+            add_message(task_key, f'特征数量: {len(feature_cols)}')
+            add_message(task_key, f'验证集用于训练监控，测试集锁死至最终评估')
+            update_progress(task_key, 8)
             
             if model_name == 'xgboost':
                 os.environ['DYLD_LIBRARY_PATH'] = '/opt/homebrew/opt/libomp/lib:' + os.environ.get('DYLD_LIBRARY_PATH', '')
@@ -409,16 +420,16 @@ def train_model():
                 y_val   = np.array([label_map.get(y, 0) for y in y_val], dtype=np.int64)
                 y_test  = np.array([label_map.get(y, 0) for y in y_test], dtype=np.int64)
                 actual_num_class = len(label_map)
-                add_message(model_name, f'标签重编码: {actual_num_class} 个连续标签 (训练集出现)')
+                add_message(task_key,f'标签重编码: {actual_num_class} 个连续标签 (训练集出现)')
 
                 # 保存重编码映射，供测试时复用，确保标签空间一致
                 _xgb_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'xgboost')
                 os.makedirs(_xgb_dir, exist_ok=True)
-                with open(os.path.join(_xgb_dir, 'xgboost_label_map.pkl'), 'wb') as _f:
+                with open(os.path.join(_xgb_dir, f'xgboost_label_map_{granularity}class.pkl'), 'wb') as _f:
                     pickle.dump({'label_map': label_map, 'train_labels': train_labels,
                                  'num_class': actual_num_class}, _f)
-                add_message(model_name, f'已保存标签重编码映射（{actual_num_class} 类连续空间）')
-                update_progress(model_name, 12)
+                add_message(task_key,f'已保存标签重编码映射（{actual_num_class} 类连续空间）')
+                update_progress(task_key, 12)
 
                 params = {
                     'n_estimators': 200,
@@ -433,22 +444,22 @@ def train_model():
                     'tree_method': 'hist'
                 }
 
-                add_message(model_name, f'XGBoost (23 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
-                add_message(model_name, '开始训练（eval_set 使用验证集，非测试集）...')
-                update_progress(model_name, 20)
+                add_message(task_key,f'XGBoost (23 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
+                add_message(task_key,'开始训练（eval_set 使用验证集，非测试集）...')
+                update_progress(task_key, 20)
 
                 start_time = time.time()
                 model = xgb.XGBClassifier(**params)
                 # 关键修复：eval_set 使用验证集，而非测试集
                 model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
                 train_time = time.time() - start_time
-                update_progress(model_name, 85)
+                update_progress(task_key, 85)
 
-                add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
+                add_message(task_key,f'训练完成，耗时: {train_time:.2f} 秒')
                 
             elif model_name == 'dnn':
                 device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
-                add_message(model_name, f'使用设备: {device}')
+                add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
                 model = DNNMultiClass(input_dim, num_classes).to(device)
@@ -464,9 +475,9 @@ def train_model():
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
                 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
-                add_message(model_name, f'【DNN 多分类】输出维度={num_classes}, loss=CrossEntropyLoss')
-                add_message(model_name, '开始训练（epoch 监控使用验证集，非测试集）...')
-                update_progress(model_name, 12)
+                add_message(task_key,f'【DNN 多分类】输出维度={num_classes}, loss=CrossEntropyLoss')
+                add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
+                update_progress(task_key, 12)
                 start_time = time.time()
                 
                 for epoch in range(50):
@@ -480,22 +491,22 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
                     
-                    update_progress(model_name, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
                     if (epoch + 1) % 10 == 0:
                         # 在验证集上计算 loss（非测试集）
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(model_name, f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
                 
                 train_time = time.time() - start_time
-                update_progress(model_name, 88)
-                add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
+                update_progress(task_key, 88)
+                add_message(task_key,f'训练完成，耗时: {train_time:.2f} 秒')
             
             elif model_name == 'cnn1d':
                 device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
-                add_message(model_name, f'使用设备: {device}')
+                add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
                 model = CNN1DMultiClass(input_dim, num_classes).to(device)
@@ -510,9 +521,9 @@ def train_model():
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
                 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
-                add_message(model_name, f'【1D-CNN 多分类】输入序列长度={input_dim}, 输出维度={num_classes}, loss=CrossEntropyLoss')
-                add_message(model_name, '开始训练（epoch 监控使用验证集，非测试集）...')
-                update_progress(model_name, 12)
+                add_message(task_key,f'【1D-CNN 多分类】输入序列长度={input_dim}, 输出维度={num_classes}, loss=CrossEntropyLoss')
+                add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
+                update_progress(task_key, 12)
                 start_time = time.time()
 
                 for epoch in range(50):
@@ -526,21 +537,21 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
-                    update_progress(model_name, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
                     if (epoch + 1) % 10 == 0:
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(model_name, f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
-                update_progress(model_name, 88)
-                add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
+                update_progress(task_key, 88)
+                add_message(task_key,f'训练完成，耗时: {train_time:.2f} 秒')
 
             elif model_name == 'transformer':
                 device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
-                add_message(model_name, f'使用设备: {device}')
+                add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
                 model = TransformerMultiClass(input_dim, num_classes).to(device)
@@ -555,9 +566,9 @@ def train_model():
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
                 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
-                add_message(model_name, f'【Transformer 多分类】token数={input_dim}, d_model=64, 输出维度={num_classes}, loss=CrossEntropyLoss')
-                add_message(model_name, '开始训练（epoch 监控使用验证集，非测试集）...')
-                update_progress(model_name, 12)
+                add_message(task_key,f'【Transformer 多分类】token数={input_dim}, d_model=64, 输出维度={num_classes}, loss=CrossEntropyLoss')
+                add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
+                update_progress(task_key, 12)
                 start_time = time.time()
 
                 for epoch in range(50):
@@ -571,21 +582,21 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
-                    update_progress(model_name, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
                     if (epoch + 1) % 10 == 0:
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(model_name, f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
-                update_progress(model_name, 88)
-                add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
+                update_progress(task_key, 88)
+                add_message(task_key,f'训练完成，耗时: {train_time:.2f} 秒')
             
             # ========== 最终评估：仅在测试集上做单次评估 ==========
-            add_message(model_name, '最终评估：在测试集上做单次评估（测试集首次参与）...')
-            update_progress(model_name, 92)
+            add_message(task_key,'最终评估：在测试集上做单次评估（测试集首次参与）...')
+            update_progress(task_key, 92)
 
             from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 
@@ -617,13 +628,13 @@ def train_model():
                 auc = float('nan')
             cm = confusion_matrix(y_test, y_pred, labels=list(range(eval_classes))).tolist()
 
-            add_message(model_name, f'测试集评估结果:')
-            add_message(model_name, f'  准确率: {accuracy:.4f}')
-            add_message(model_name, f'  精确率 (weighted): {precision:.4f}')
-            add_message(model_name, f'  召回率 (weighted): {recall:.4f}')
-            add_message(model_name, f'  F1-Score (weighted): {f1:.4f}')
-            add_message(model_name, f'  AUC: {auc:.4f}')
-            add_message(model_name, f'  混淆矩阵: {cm}')
+            add_message(task_key,f'测试集评估结果:')
+            add_message(task_key,f'  准确率: {accuracy:.4f}')
+            add_message(task_key,f'  精确率 (weighted): {precision:.4f}')
+            add_message(task_key,f'  召回率 (weighted): {recall:.4f}')
+            add_message(task_key,f'  F1-Score (weighted): {f1:.4f}')
+            add_message(task_key,f'  AUC: {auc:.4f}')
+            add_message(task_key,f'  混淆矩阵: {cm}')
             
             metrics = {
                 'test_acc': accuracy,
@@ -641,23 +652,23 @@ def train_model():
             os.makedirs(model_dir, exist_ok=True)
             
             if model_name in ('dnn', 'cnn1d', 'transformer'):
-                torch.save(model.state_dict(), os.path.join(model_dir, f'model_{model_name}.pth'))
+                torch.save(model.state_dict(), os.path.join(model_dir, f'model_{model_name}_{granularity}.pth'))
             else:
-                joblib.dump(model, os.path.join(model_dir, f'model_{model_name}.pkl'))
+                joblib.dump(model, os.path.join(model_dir, f'model_{model_name}_{granularity}.pkl'))
             
-            pd.DataFrame([metrics]).to_csv(os.path.join(model_dir, f'results_{model_name}_metrics.csv'), index=False)
+            pd.DataFrame([metrics]).to_csv(os.path.join(model_dir, f'results_{model_name}_{granularity}_metrics.csv'), index=False)
             
-            add_message(model_name, f'模型已保存至: {model_dir}')
-            add_message(model_name, f'{model_name} 模型训练完成!')
+            add_message(task_key,f'模型已保存至: {model_dir}')
+            add_message(task_key,f'{model_name} 模型训练完成!')
 
-            training_status[model_name] = 'completed'
-            update_progress(model_name, 100)
+            training_status[task_key] ='completed'
+            update_progress(task_key, 100)
 
         except Exception as e:
             import traceback
-            add_message(model_name, f'错误: {str(e)}')
-            add_message(model_name, traceback.format_exc())
-            training_status[model_name] = 'error'
+            add_message(task_key,f'错误: {str(e)}')
+            add_message(task_key,traceback.format_exc())
+            training_status[task_key] ='error'
     
     thread = threading.Thread(target=run_training)
     thread.start()
@@ -668,22 +679,32 @@ def train_model():
 def get_train_status(model_name):
     if model_name not in ['xgboost', 'dnn', 'cnn1d', 'transformer']:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
+    granularity = request.args.get('granularity', '23')
+    if granularity not in ('5', '23'):
+        return jsonify({'status': 'error', 'message': '无效的分类粒度'})
+    task_key = f'{model_name}_{granularity}'
 
     return jsonify({
-        'status': training_status[model_name],
-        'messages': training_messages[model_name],
-        'progress': training_progress.get(model_name, 0)
+        'status': training_status.get(task_key, 'idle'),
+        'messages': training_messages.get(task_key, []),
+        'progress': training_progress.get(task_key, 0)
     })
 
 @app.route('/results/compare')
 def get_comparison_results():
     try:
+        granularity = request.args.get('granularity', '23')
+        if granularity not in ('5', '23'):
+            return jsonify({'status': 'error', 'message': '无效的分类粒度'})
         results = {}
-        
+
         models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
-        
+
         for model_name in ['xgboost', 'dnn', 'cnn1d', 'transformer']:
-            metric_path = os.path.join(models_dir, model_name, f'results_{model_name}_metrics.csv')
+            # 优先找带粒度后缀的新文件，回退到旧的无后缀文件（兼容已有 23 类产物）
+            metric_path = os.path.join(models_dir, model_name, f'results_{model_name}_{granularity}_metrics.csv')
+            if not os.path.exists(metric_path) and granularity == '23':
+                metric_path = os.path.join(models_dir, model_name, f'results_{model_name}_metrics.csv')
             if os.path.exists(metric_path):
                 df = pd.read_csv(metric_path)
                 results[model_name] = {
@@ -706,8 +727,13 @@ def get_comparison_results():
 @app.route('/results/model/<model_name>')
 def get_model_results(model_name):
     try:
+        granularity = request.args.get('granularity', '23')
+        if granularity not in ('5', '23'):
+            return jsonify({'status': 'error', 'message': '无效的分类粒度'})
         models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
-        metric_path = os.path.join(models_dir, model_name, f'results_{model_name}_metrics.csv')
+        metric_path = os.path.join(models_dir, model_name, f'results_{model_name}_{granularity}_metrics.csv')
+        if not os.path.exists(metric_path) and granularity == '23':
+            metric_path = os.path.join(models_dir, model_name, f'results_{model_name}_metrics.csv')
         
         if not os.path.exists(metric_path):
             return jsonify({'status': 'error', 'message': f'{model_name} 模型结果不存在'})
@@ -733,19 +759,24 @@ def get_model_results(model_name):
 @app.route('/features/importance/<model_name>')
 def get_feature_importance(model_name):
     try:
+        granularity = request.args.get('granularity', '23')
+        if granularity not in ('5', '23'):
+            return jsonify({'status': 'error', 'message': '无效的分类粒度'})
         models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
-        
+
         if model_name in ('dnn', 'cnn1d', 'transformer'):
             return jsonify({'status': 'error', 'message': f'{model_name} 模型不支持特征重要性分析'})
         
-        model_path = os.path.join(models_dir, model_name, f'model_{model_name}.pkl')
+        model_path = os.path.join(models_dir, model_name, f'model_{model_name}_{granularity}.pkl')
+        if not os.path.exists(model_path) and granularity == '23':
+            model_path = os.path.join(models_dir, model_name, f'model_{model_name}.pkl')
         if not os.path.exists(model_path):
-            return jsonify({'status': 'error', 'message': f'{model_name} 模型不存在'})
+            return jsonify({'status': 'error', 'message': f'{model_name}({granularity}类) 模型不存在'})
         
         import joblib
         model = joblib.load(model_path)
         
-        data_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Train', 'KDDTrain_preprocessed.csv')
+        data_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Train', 'KDDTrain_preprocessed_train.csv')
         df = pd.read_csv(data_path)
         
         exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded']
@@ -771,29 +802,9 @@ def get_feature_importance(model_name):
 @app.route('/reset/status')
 def reset_status():
     global training_status, training_messages, training_progress
-    training_status = {
-        'xgboost': 'idle',
-        'dnn': 'idle',
-        'cnn1d': 'idle',
-        'transformer': 'idle',
-        'preprocessing': 'idle',
-        'test_xgboost': 'idle',
-        'test_dnn': 'idle',
-        'test_cnn1d': 'idle',
-        'test_transformer': 'idle'
-    }
-    training_messages = {
-        'xgboost': [],
-        'dnn': [],
-        'cnn1d': [],
-        'transformer': [],
-        'preprocessing': [],
-        'test_xgboost': [],
-        'test_dnn': [],
-        'test_cnn1d': [],
-        'test_transformer': []
-    }
-    training_progress = {k: 0 for k in training_status}
+    training_status = {k: 'idle' for k in _STATUS_KEYS}
+    training_messages = {k: [] for k in _STATUS_KEYS}
+    training_progress = {k: 0 for k in _STATUS_KEYS}
     return jsonify({'status': 'success'})
 
 @app.route('/test/model', methods=['POST'])
@@ -801,13 +812,16 @@ def test_model():
     """使用新的测试集评估已训练好的模型"""
     model_name = request.json.get('model_name')
     test_file = request.json.get('test_file', 'train_test')  # 默认使用 train_test 文件
+    granularity = request.json.get('granularity', '23')
+    if granularity not in ('5', '23'):
+        return jsonify({'status': 'error', 'message': '无效的分类粒度，仅支持 5 或 23'})
     
     if model_name not in ['xgboost', 'dnn', 'cnn1d', 'transformer']:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
     
-    task_key = f'test_{model_name}'
+    task_key = f'test_{model_name}_{granularity}'
     if training_status[task_key] == 'running':
-        return jsonify({'status': 'error', 'message': f'{model_name} 正在测试中'})
+        return jsonify({'status': 'error', 'message': f'{model_name}({granularity}类) 正在测试中'})
     
     training_status[task_key] = 'running'
     training_messages[task_key] = []
@@ -858,15 +872,35 @@ def test_model():
             # 标签处理（多分类）
             df_test['label_binary'] = df_test['label'].apply(lambda x: 0 if x == 'normal' else 1)
             
-            # 加载23类编码器，为测试数据生成多分类标签
-            class_file = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
+            # 按分类粒度为测试数据生成标签
+            if granularity == '5':
+                class_file = os.path.join(base_dir, 'Train', 'encoder_category_5_classes.txt')
+            else:
+                class_file = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
             if os.path.exists(class_file):
                 with open(class_file, 'r') as f:
                     class_names = [line.strip() for line in f if line.strip()]
                 label_to_idx = {name: i for i, name in enumerate(class_names)}
-                df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(0).astype(int)
+                if granularity == '5':
+                    # 5 类：原始攻击先经 ATTACK_CATEGORIES 归到 5 大类，再映射到索引
+                    df_test['label_multiclass_encoded'] = df_test['label'].map(
+                        lambda x: ATTACK_CATEGORIES.get(x, 'normal')).map(label_to_idx).fillna(
+                        label_to_idx.get('normal', 0)).astype(int)
+                else:
+                    df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(0).astype(int)
             else:
-                df_test['label_multiclass_encoded'] = df_test['label_binary']
+                if granularity == '5':
+                    # 5 类编码器不存在：动态从训练集 label_category 列构建映射
+                    train_csv = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_train.csv')
+                    cat_classes = sorted(pd.read_csv(train_csv, usecols=['label_category'])[
+                        'label_category'].dropna().unique().tolist())
+                    label_to_idx = {c: i for i, c in enumerate(cat_classes)}
+                    df_test['label_multiclass_encoded'] = df_test['label'].map(
+                        lambda x: ATTACK_CATEGORIES.get(x, 'normal')).map(label_to_idx).fillna(
+                        label_to_idx.get('normal', 0)).astype(int)
+                    add_message(task_key, f'未找到 5 类编码器，动态构建类别: {cat_classes}')
+                else:
+                    df_test['label_multiclass_encoded'] = df_test['label_binary']
             
             y_test = df_test['label_multiclass_encoded'].values
             unique_labels, label_counts = np.unique(y_test, return_counts=True)
@@ -919,9 +953,13 @@ def test_model():
             # 加载模型
             model_dir = os.path.join(base_dir, 'models', model_name)
             if model_name in ('dnn', 'cnn1d', 'transformer'):
-                model_path = os.path.join(model_dir, f'model_{model_name}.pth')
+                model_path = os.path.join(model_dir, f'model_{model_name}_{granularity}.pth')
+                if not os.path.exists(model_path) and granularity == '23':
+                    model_path = os.path.join(model_dir, f'model_{model_name}.pth')
             else:
-                model_path = os.path.join(model_dir, f'model_{model_name}.pkl')
+                model_path = os.path.join(model_dir, f'model_{model_name}_{granularity}.pkl')
+                if not os.path.exists(model_path) and granularity == '23':
+                    model_path = os.path.join(model_dir, f'model_{model_name}.pkl')
             
             if not os.path.exists(model_path):
                 add_message(task_key, f'错误: 模型文件不存在，请先训练 {model_name} 模型')
@@ -968,7 +1006,9 @@ def test_model():
                 model = joblib.load(model_path)
 
                 # 加载训练时的标签重编码映射，统一到模型输出空间评估
-                label_map_path = os.path.join(model_dir, 'xgboost_label_map.pkl')
+                label_map_path = os.path.join(model_dir, f'xgboost_label_map_{granularity}class.pkl')
+                if not os.path.exists(label_map_path) and granularity == '23':
+                    label_map_path = os.path.join(model_dir, 'xgboost_label_map.pkl')
                 if os.path.exists(label_map_path):
                     with open(label_map_path, 'rb') as _f:
                         _saved_map = pickle.load(_f)
@@ -1047,7 +1087,7 @@ def test_model():
                 'test_samples': len(y_test)
             }
             
-            results_path = os.path.join(model_dir, f'results_{model_name}_external_test.csv')
+            results_path = os.path.join(model_dir, f'results_{model_name}_{granularity}_external_test.csv')
             pd.DataFrame([test_results]).to_csv(results_path, index=False)
             add_message(task_key, f'测试结果已保存: {results_path}')
             add_message(task_key, f'{model_name} 模型测试完成!')
@@ -1068,7 +1108,10 @@ def test_model():
 
 @app.route('/test/status/<model_name>')
 def get_test_status(model_name):
-    task_key = f'test_{model_name}'
+    granularity = request.args.get('granularity', '23')
+    if granularity not in ('5', '23'):
+        return jsonify({'status': 'error', 'message': '无效的分类粒度'})
+    task_key = f'test_{model_name}_{granularity}'
     if task_key not in training_status:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
     
@@ -1081,8 +1124,13 @@ def get_test_status(model_name):
 @app.route('/test/results/<model_name>')
 def get_test_results(model_name):
     try:
+        granularity = request.args.get('granularity', '23')
+        if granularity not in ('5', '23'):
+            return jsonify({'status': 'error', 'message': '无效的分类粒度'})
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        results_path = os.path.join(base_dir, 'models', model_name, f'results_{model_name}_external_test.csv')
+        results_path = os.path.join(base_dir, 'models', model_name, f'results_{model_name}_{granularity}_external_test.csv')
+        if not os.path.exists(results_path) and granularity == '23':
+            results_path = os.path.join(base_dir, 'models', model_name, f'results_{model_name}_external_test.csv')
         
         if not os.path.exists(results_path):
             return jsonify({'status': 'error', 'message': f'{model_name} 测试结果不存在'})

@@ -1,7 +1,7 @@
 data/
 AIMemory/
 data_preprocessing/__pycache__/
-models/dnn/model_dnn.pth
+models/dnn/*.pth
 models/dnn/*.csv
 models/xgboost/*.pkl
 models/xgboost/*.csv
@@ -13,6 +13,8 @@ models/transformer/*.csv
 models/transformer/*.png
 Train/encoder_multiclass_23_classes.txt
 Train/encoder_multiclass_23.pkl
+Train/encoder_category_5.pkl
+Train/encoder_category_5_classes.txt
 Train/encoder_onehot.pkl
 Train/KDDTrain_preprocessed_test.csv
 Train/KDDTrain_preprocessed_train.csv

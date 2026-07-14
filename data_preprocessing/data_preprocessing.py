@@ -357,6 +357,12 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     with open(class_list_path, 'w') as f:
         for c in le_multiclass.classes_:
             f.write(c + '\n')
+    # 保存 5 大类标签编码器（normal/dos/probe/r2l/u2r，供 5 分类任务推理映射）
+    joblib.dump(le_category, f"{output_dir}/encoder_category_5.pkl")
+    class_list_path_5 = f"{output_dir}/encoder_category_5_classes.txt"
+    with open(class_list_path_5, 'w') as f:
+        for c in le_category.classes_:
+            f.write(c + '\n')
 
     print(f"\n已保存文件:")
     print(f"  训练集: {output_dir}/KDDTrain_preprocessed_train.csv")
@@ -366,6 +372,7 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     print(f"  标准化器: {output_dir}/scaler_standard.pkl")
     print(f"  预处理元数据: {output_dir}/preprocessing_metadata.pkl")
     print(f"  23分类标签编码器: {output_dir}/encoder_multiclass_23.pkl")
+    print(f"  5分类标签编码器: {output_dir}/encoder_category_5.pkl")
 
     print("\n" + "=" * 60)
     print("数据预处理完成！")
