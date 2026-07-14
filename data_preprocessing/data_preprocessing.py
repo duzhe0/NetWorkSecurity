@@ -102,7 +102,7 @@ def explore_data(df):
 
 
 def preprocess_labels(df):
-    """标签处理：二分类 + 多分类"""
+    """标签处理：二分类 + 5大分类 + 23细分类"""
     print("\n" + "=" * 60)
     print("二、标签预处理")
     print("=" * 60)
@@ -121,50 +121,94 @@ def preprocess_labels(df):
     print("\n【多分类标签分布（5大类）】")
     print(df['label_category'].value_counts())
 
-    # 3. 多分类数值编码
-    le = LabelEncoder()
-    df['label_category_encoded'] = le.fit_transform(df['label_category'])
-    print("\n【多分类标签编码映射】")
-    for i, class_name in enumerate(le.classes_):
+    # 3. 5大分类数值编码
+    le_category = LabelEncoder()
+    df['label_category_encoded'] = le_category.fit_transform(df['label_category'])
+    print("\n【5大分类标签编码映射】")
+    for i, class_name in enumerate(le_category.classes_):
         print(f"  {i} -> {class_name}")
 
-    return df, le
+    # 4. 23 细分类标签：normal + 22 种具体攻击类型
+    df['label_multiclass'] = df['label']  # 原始具体类型
+    le_multiclass = LabelEncoder()
+    df['label_multiclass_encoded'] = le_multiclass.fit_transform(df['label_multiclass'])
+
+    print("\n【23 分类标签分布】")
+    mc_counts = df['label_multiclass'].value_counts()
+    print(f"23 分类总类别数: {len(le_multiclass.classes_)}")
+    print(mc_counts)
+
+    print("\n【23 分类标签编码映射】")
+    for i, class_name in enumerate(le_multiclass.classes_):
+        print(f"  {i} -> {class_name}")
+
+    return df, le_category, le_multiclass
 
 
 def split_data(df, test_size=0.2, val_size=0.1, random_state=42):
     """
     先切分数据集：训练集 / 验证集 / 测试集
     切分在预处理（标准化）之前完成，避免数据泄漏
-    
+
     划分比例：训练集70% / 验证集10% / 测试集20%
+    使用 23 分类标签做分层采样；当某些类样本过少时，退化为 random split
     """
     print("\n" + "=" * 60)
     print("三、数据集划分（先切分，后标准化，防止数据泄漏）")
     print("=" * 60)
 
-    y = df['label_binary'].values
+    # 使用 23 分类标签做分层，保证稀有类别在三个集合中都有代表
+    y = df['label_multiclass_encoded'].values
+
+    # 检查每个类别的样本数：若少于 2（split 后会 < 1），则改用 random split
+    class_counts = pd.Series(y).value_counts()
+    too_few_classes = class_counts[class_counts < 2].index.tolist()
+    use_stratify = len(too_few_classes) == 0
+
+    if not use_stratify:
+        print(f"  ⚠️ 以下 {len(too_few_classes)} 个类别样本数 < 2，无法使用 stratified split：")
+        for c in too_few_classes:
+            class_name = df.loc[df['label_multiclass_encoded'] == c, 'label_multiclass'].iloc[0]
+            print(f"      - {class_name} (encoded={c}, count={class_counts[c]})")
+        print(f"  改用 random split（不带 stratify）")
 
     # 第一步：分出测试集（20%）
-    df_train_val, df_test = train_test_split(
-        df, test_size=test_size, random_state=random_state, stratify=y
-    )
+    if use_stratify:
+        df_train_val, df_test = train_test_split(
+            df, test_size=test_size, random_state=random_state, stratify=y
+        )
+    else:
+        df_train_val, df_test = train_test_split(
+            df, test_size=test_size, random_state=random_state
+        )
 
     # 第二步：从剩余数据中分出验证集
     # val_size 相对于全量数据，所以相对 train_val 的比例为 val_size / (1 - test_size)
     val_ratio = val_size / (1 - test_size)
-    y_train_val = df_train_val['label_binary'].values
-    df_train, df_val = train_test_split(
-        df_train_val, test_size=val_ratio, random_state=random_state, stratify=y_train_val
-    )
+    y_train_val = df_train_val['label_multiclass_encoded'].values
+    # 同样判断 train_val 中是否还有过少类别的类
+    tv_class_counts = pd.Series(y_train_val).value_counts()
+    tv_too_few = tv_class_counts[tv_class_counts < 2].index.tolist()
+    tv_use_stratify = len(tv_too_few) == 0
+
+    if tv_use_stratify:
+        df_train, df_val = train_test_split(
+            df_train_val, test_size=val_ratio, random_state=random_state, stratify=y_train_val
+        )
+    else:
+        df_train, df_val = train_test_split(
+            df_train_val, test_size=val_ratio, random_state=random_state
+        )
 
     print(f"\n训练集: {len(df_train)} 样本 ({len(df_train)/len(df)*100:.1f}%)")
     print(f"验证集: {len(df_val)} 样本 ({len(df_val)/len(df)*100:.1f}%)")
     print(f"测试集: {len(df_test)} 样本 ({len(df_test)/len(df)*100:.1f}%)")
 
-    # 检查各集标签分布
+    # 检查各集标签分布（以 23 分类为例）
+    print("\n【23 分类在三个集合的样本数】")
     for name, subset in [('训练集', df_train), ('验证集', df_val), ('测试集', df_test)]:
-        dist = subset['label_binary'].value_counts()
-        print(f"  {name}标签分布: normal={dist.get(0,0)}, attack={dist.get(1,0)}")
+        dist = subset['label_multiclass'].value_counts()
+        print(f"  {name}: 类别数={dist.size}, 正常={int(dist.get('normal', 0))}, 总攻击={len(subset) - int(dist.get('normal', 0))}")
 
     return df_train, df_val, df_test
 
@@ -237,7 +281,7 @@ def encode_and_scale(df_train, df_val, df_test):
 
 def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     """主函数：完整的数据预处理流程（防数据泄漏版本）
-    
+
     Args:
         data_file: 训练数据文件名（KDDTrain+.txt 或 KDDTrain+_20Percent.txt）
         data_dir: 数据目录路径
@@ -256,8 +300,8 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     # Step 2: 数据探索
     df = explore_data(df)
 
-    # Step 3: 标签处理（二分类 + 多分类）
-    df, label_encoder = preprocess_labels(df)
+    # Step 3: 标签处理（二分类 + 5大分类 + 23细分类）
+    df, le_category, le_multiclass = preprocess_labels(df)
 
     # Step 4: 先切分数据集（在标准化之前！）
     df_train, df_val, df_test = split_data(df, test_size=0.2, val_size=0.1)
@@ -266,9 +310,10 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     df_train_processed, df_val_processed, df_test_processed, ohe, scaler, ohe_feature_names = \
         encode_and_scale(df_train, df_val, df_test)
 
-    # 确定特征列
+    # 确定特征列（排除所有标签列：原始label, difficulty, label_binary, label_category, label_category_encoded, label_multiclass, label_multiclass_encoded）
     exclude_cols = ['label', 'difficulty', 'label_binary',
-                    'label_category', 'label_category_encoded']
+                    'label_category', 'label_category_encoded',
+                    'label_multiclass', 'label_multiclass_encoded']
     feature_cols = [col for col in df_train_processed.columns if col not in exclude_cols]
 
     # ========== 预处理结果汇总 ==========
@@ -283,7 +328,10 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     print(f"特征矩阵列数: {len(feature_cols)}")
     print(f"  - 数值型特征: {len([c for c in NUMERIC_FEATURES if c in feature_cols])} 个（已标准化）")
     print(f"  - One-Hot编码特征: {len(ohe_feature_names)} 个")
-    print(f"标签列: label_binary(二分类), label_category_encoded(多分类)")
+    print(f"标签列:")
+    print(f"  - label_binary: 二分类 (normal/attack)")
+    print(f"  - label_category_encoded: 5大分类 (normal/dos/probe/r2l/u2r)")
+    print(f"  - label_multiclass_encoded: 23细分类 (normal + 22种具体攻击)")
     print(f"\n关键原则:")
     print(f"  - StandardScaler 仅在训练集上 fit，验证/测试集只 transform")
     print(f"  - OneHotEncoder 仅在训练集上 fit，验证/测试集只 transform")
@@ -302,6 +350,13 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     joblib.dump(scaler, f"{output_dir}/scaler_standard.pkl")
     joblib.dump({'feature_cols': feature_cols, 'ohe_feature_names': list(ohe_feature_names)},
                 f"{output_dir}/preprocessing_metadata.pkl")
+    # 保存 23 分类标签编码器（供模型推理时将预测索引映射回具体类型）
+    joblib.dump(le_multiclass, f"{output_dir}/encoder_multiclass_23.pkl")
+    # 额外保存一份纯类别列表（跨 sklearn 版本兼容）
+    class_list_path = f"{output_dir}/encoder_multiclass_23_classes.txt"
+    with open(class_list_path, 'w') as f:
+        for c in le_multiclass.classes_:
+            f.write(c + '\n')
 
     print(f"\n已保存文件:")
     print(f"  训练集: {output_dir}/KDDTrain_preprocessed_train.csv")
@@ -310,6 +365,7 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     print(f"  OneHot编码器: {output_dir}/encoder_onehot.pkl")
     print(f"  标准化器: {output_dir}/scaler_standard.pkl")
     print(f"  预处理元数据: {output_dir}/preprocessing_metadata.pkl")
+    print(f"  23分类标签编码器: {output_dir}/encoder_multiclass_23.pkl")
 
     print("\n" + "=" * 60)
     print("数据预处理完成！")

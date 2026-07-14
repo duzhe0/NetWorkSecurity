@@ -355,30 +355,6 @@
                                     <div class="card-header">
                                         <div class="row align-items-center">
                                             <div class="col-8">
-                                                <h5>随机森林</h5>
-                                            </div>
-                                            <div class="col-4">
-                                                <span id="status-random_forest" class="status-badge status-idle">待训练</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="card-body">
-                                        <p class="text-sm text-muted mb-3">集成学习，稳定可靠，易于调参</p>
-                                        <button id="btn-random_forest" class="btn btn-success w-100 mb-2" onclick="trainModel('random_forest')">
-                                            <i class="fas fa-play"></i> 开始训练
-                                        </button>
-                                        <div class="log-area" id="log-random_forest">
-                                            <div class="text-muted">等待训练...</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="col-md-4">
-                                <div class="card mb-4">
-                                    <div class="card-header">
-                                        <div class="row align-items-center">
-                                            <div class="col-8">
                                                 <h5>DNN</h5>
                                             </div>
                                             <div class="col-4">
@@ -453,7 +429,7 @@
                             </div>
                             <div class="card-body">
                                 <div class="row">
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <h6>XGBoost 参数</h6>
                                         <ul class="text-sm">
                                             <li>n_estimators: 100</li>
@@ -462,16 +438,7 @@
                                             <li>objective: binary:logistic</li>
                                         </ul>
                                     </div>
-                                    <div class="col-md-4">
-                                        <h6>随机森林 参数</h6>
-                                        <ul class="text-sm">
-                                            <li>n_estimators: 100</li>
-                                            <li>max_depth: 10</li>
-                                            <li>min_samples_split: 5</li>
-                                            <li>min_samples_leaf: 2</li>
-                                        </ul>
-                                    </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <h6>DNN 参数</h6>
                                         <ul class="text-sm">
                                             <li>隐藏层: 256 → 128 → 64</li>
@@ -480,13 +447,22 @@
                                             <li>训练轮数: 50</li>
                                         </ul>
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <h6>Isolation Forest 参数</h6>
                                         <ul class="text-sm">
-                                            <li>n_estimators: 200</li>
-                                            <li>contamination: 训练集攻击比例</li>
-                                            <li>max_samples: 'auto'</li>
-                                            <li>无监督学习，无需标签</li>
+                                            <li>n_estimators: 500</li>
+                                            <li>max_samples: 256</li>
+                                            <li>contamination: 0.05</li>
+                                            <li>无监督学习，仅用正常流量</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <h6>AutoEncoder 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>隐藏层: 256 → 128 → 64</li>
+                                            <li>Dropout: 0.2</li>
+                                            <li>学习率: 0.001</li>
+                                            <li>无监督学习，重构误差检测</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -519,19 +495,14 @@
                             </div>
                             <div class="card-body">
                                 <div class="row">
-                                    <div class="col-md-4">
+                                    <div class="col-md-6">
                                         <button class="btn btn-primary w-100" onclick="loadFeatureImportance('xgboost')">
                                             XGBoost 特征重要性
                                         </button>
                                     </div>
-                                    <div class="col-md-4">
-                                        <button class="btn btn-success w-100" onclick="loadFeatureImportance('random_forest')">
-                                            随机森林 特征重要性
-                                        </button>
-                                    </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-6">
                                         <button class="btn btn-secondary w-100" disabled>
-                                            DNN（不支持）
+                                            DNN / Isolation Forest / AutoEncoder（不支持）
                                         </button>
                                     </div>
                                 </div>
@@ -573,27 +544,6 @@
                                                     <i class="fas fa-play"></i> 开始测试
                                                 </button>
                                                 <div class="log-area" id="test-log-xgboost" style="height:200px">
-                                                    <div class="text-muted">等待测试...</div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="col-md-4">
-                                        <div class="card">
-                                            <div class="card-header">
-                                                <div class="row align-items-center">
-                                                    <div class="col-8"><h6>随机森林</h6></div>
-                                                    <div class="col-4">
-                                                        <span id="test-status-random_forest" class="status-badge status-idle">待测试</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="card-body">
-                                                <button class="btn btn-success w-100 mb-2" onclick="testModel('random_forest')">
-                                                    <i class="fas fa-play"></i> 开始测试
-                                                </button>
-                                                <div class="log-area" id="test-log-random_forest" style="height:200px">
                                                     <div class="text-muted">等待测试...</div>
                                                 </div>
                                             </div>
@@ -1091,7 +1041,7 @@
                     document.getElementById('comparison-content').innerHTML = content;
                     
                     const names = Object.keys(results).map(n => getModelName(n));
-                    const colors = ['#667eea', '#28a745', '#9b59b6', '#f59e0b'];
+                    const colors = ['#3498db', '#9b59b6', '#f59e0b', '#14b8a6'];
                     
                     new Chart(document.getElementById('chart-accuracy'), {
                         type: 'bar',
@@ -1150,9 +1100,9 @@
         function getModelName(name) {
             const map = {
                 'xgboost': 'XGBoost',
-                'random_forest': '随机森林',
                 'dnn': 'DNN',
-                'isolation_forest': 'Isolation Forest'
+                'isolation_forest': 'Isolation Forest',
+                'autoencoder': 'AutoEncoder'
             };
             return map[name] || name;
         }
@@ -1248,7 +1198,7 @@
         }
 
         function loadTestComparison() {
-            const models = ['xgboost', 'random_forest', 'dnn', 'isolation_forest'];
+            const models = ['xgboost', 'dnn', 'isolation_forest', 'autoencoder'];
             let results = {};
             let completed = 0;
             
@@ -1344,7 +1294,7 @@
             document.getElementById('test-comparison-content').innerHTML = content;
             
             const names = Object.keys(results).map(n => getModelName(n));
-            const colors = ['#667eea', '#28a745', '#9b59b6', '#f59e0b'];
+            const colors = ['#3498db', '#9b59b6', '#f59e0b', '#14b8a6'];
             
             new Chart(document.getElementById('chart-test-accuracy'), {
                 type: 'bar',

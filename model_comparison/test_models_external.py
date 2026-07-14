@@ -5,8 +5,9 @@
 
 使用方法:
     python3 test_models_external.py --model xgboost
-    python3 test_models_external.py --model random_forest
     python3 test_models_external.py --model dnn
+    python3 test_models_external.py --model isolation_forest
+    python3 test_models_external.py --model autoencoder
     python3 test_models_external.py --model all
 """
 
@@ -108,19 +109,99 @@ def test_xgboost(X_test, y_test, base_dir):
     return y_pred, y_prob, model_path
 
 
-def test_random_forest(X_test, y_test, base_dir):
-    """测试随机森林模型"""
-    model_path = os.path.join(base_dir, 'models', 'random_forest', 'model_randomforest.pkl')
+def test_isolation_forest(X_test, y_test, base_dir):
+    """测试 Isolation Forest 模型"""
+    import pickle
+    import numpy as np
+    
+    model_path = os.path.join(base_dir, 'models', 'isolation_forest', 'model_isolation_forest.pkl')
+    params_path = os.path.join(base_dir, 'models', 'isolation_forest', 'isolation_forest_params.pkl')
     
     if not os.path.exists(model_path):
-        raise FileNotFoundError(f"模型文件不存在: {model_path}\n请先训练随机森林模型")
+        raise FileNotFoundError(f"模型文件不存在: {model_path}\n请先训练 Isolation Forest 模型")
+    if not os.path.exists(params_path):
+        raise FileNotFoundError(f"参数文件不存在: {params_path}\n请先训练 Isolation Forest 模型")
     
     print(f"\n[加载模型] {model_path}")
     model = joblib.load(model_path)
     
+    with open(params_path, 'rb') as f:
+        params = pickle.load(f)
+    best_threshold = params['threshold']
+    print(f"  阈值: {best_threshold:.4f}")
+    
     print("[预测中...]")
-    y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)[:, 1]
+    scores = model.decision_function(X_test)
+    y_pred = (scores < best_threshold).astype(int)
+    y_prob = 1 - (scores - scores.min()) / (scores.max() - scores.min())
+    
+    return y_pred, y_prob, model_path
+
+
+def test_autoencoder(X_test, y_test, base_dir):
+    """测试 AutoEncoder 模型"""
+    import pickle
+    import numpy as np
+    import torch
+    import torch.nn as nn
+    
+    model_path = os.path.join(base_dir, 'models', 'autoencoder', 'model_autoencoder.pth')
+    params_path = os.path.join(base_dir, 'models', 'autoencoder', 'autoencoder_params.pkl')
+    
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"模型文件不存在: {model_path}\n请先训练 AutoEncoder 模型")
+    if not os.path.exists(params_path):
+        raise FileNotFoundError(f"参数文件不存在: {params_path}\n请先训练 AutoEncoder 模型")
+    
+    with open(params_path, 'rb') as f:
+        params = pickle.load(f)
+    best_threshold = params['threshold']
+    input_dim = params['input_dim']
+    
+    class AutoEncoder(nn.Module):
+        def __init__(self, input_dim, hidden_dims=[256, 128, 64], dropout_rate=0.2):
+            super(AutoEncoder, self).__init__()
+            layers = []
+            prev_dim = input_dim
+            for hidden_dim in hidden_dims:
+                layers.append(nn.Linear(prev_dim, hidden_dim))
+                layers.append(nn.BatchNorm1d(hidden_dim))
+                layers.append(nn.ReLU())
+                layers.append(nn.Dropout(dropout_rate))
+                prev_dim = hidden_dim
+            self.encoder = nn.Sequential(*layers)
+            
+            layers_dec = []
+            for hidden_dim in reversed(hidden_dims[:-1]):
+                layers_dec.append(nn.Linear(prev_dim, hidden_dim))
+                layers_dec.append(nn.BatchNorm1d(hidden_dim))
+                layers_dec.append(nn.ReLU())
+                layers_dec.append(nn.Dropout(dropout_rate))
+                prev_dim = hidden_dim
+            layers_dec.append(nn.Linear(prev_dim, input_dim))
+            self.decoder = nn.Sequential(*layers_dec)
+        
+        def forward(self, x):
+            encoded = self.encoder(x)
+            decoded = self.decoder(encoded)
+            return decoded
+    
+    print(f"\n[加载模型] {model_path}")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"  使用设备: {device}")
+    print(f"  阈值: {best_threshold:.6f}")
+    
+    model = AutoEncoder(input_dim=input_dim).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    
+    print("[预测中...]")
+    X_test_tensor = torch.FloatTensor(X_test).to(device)
+    with torch.no_grad():
+        test_outputs = model(X_test_tensor)
+        test_errors = torch.mean((test_outputs - X_test_tensor) ** 2, dim=1).cpu().numpy()
+    y_pred = (test_errors > best_threshold).astype(int)
+    y_prob = (test_errors - test_errors.min()) / (test_errors.max() - test_errors.min() + 1e-10)
     
     return y_pred, y_prob, model_path
 
@@ -217,7 +298,7 @@ def evaluate_and_save(model_name, y_test, y_pred, y_prob, base_dir, test_file):
 def main():
     parser = argparse.ArgumentParser(description='使用外部测试集评估模型')
     parser.add_argument('--model', type=str, default='all',
-                        choices=['xgboost', 'random_forest', 'dnn', 'all'],
+                        choices=['xgboost', 'dnn', 'isolation_forest', 'autoencoder', 'all'],
                         help='要测试的模型名称，默认 all')
     parser.add_argument('--test_file', type=str, default='train_test',
                         help='测试数据文件名（位于 Train 目录），默认 train_test')
@@ -243,7 +324,7 @@ def main():
     X_test, y_test, feature_cols = preprocess_test_data(test_path, base_dir, ohe, scaler)
     
     # 测试模型
-    models_to_test = ['xgboost', 'random_forest', 'dnn'] if args.model == 'all' else [args.model]
+    models_to_test = ['xgboost', 'dnn', 'isolation_forest', 'autoencoder'] if args.model == 'all' else [args.model]
     
     all_results = {}
     for model_name in models_to_test:
@@ -254,10 +335,12 @@ def main():
             
             if model_name == 'xgboost':
                 y_pred, y_prob, model_path = test_xgboost(X_test, y_test, base_dir)
-            elif model_name == 'random_forest':
-                y_pred, y_prob, model_path = test_random_forest(X_test, y_test, base_dir)
             elif model_name == 'dnn':
                 y_pred, y_prob, model_path = test_dnn(X_test, y_test, base_dir)
+            elif model_name == 'isolation_forest':
+                y_pred, y_prob, model_path = test_isolation_forest(X_test, y_test, base_dir)
+            elif model_name == 'autoencoder':
+                y_pred, y_prob, model_path = test_autoencoder(X_test, y_test, base_dir)
             
             results = evaluate_and_save(model_name, y_test, y_pred, y_prob, base_dir, args.test_file)
             all_results[model_name] = results
@@ -274,10 +357,10 @@ def main():
         print(f"\n{'='*60}")
         print("测试结果汇总对比")
         print(f"{'='*60}")
-        print(f"\n{'模型':<15} {'准确率':<10} {'精确率':<10} {'召回率':<10} {'F1-Score':<10} {'AUC':<10}")
-        print("-" * 65)
+        print(f"\n{'模型':<18} {'准确率':<10} {'精确率':<10} {'召回率':<10} {'F1-Score':<10} {'AUC':<10}")
+        print("-" * 72)
         for model_name, r in all_results.items():
-            print(f"{model_name:<15} {r['test_acc']:.4f}    {r['precision']:.4f}    {r['recall']:.4f}    {r['f1']:.4f}    {r['auc']:.4f}")
+            print(f"{model_name:<18} {r['test_acc']:.4f}    {r['precision']:.4f}    {r['recall']:.4f}    {r['f1']:.4f}    {r['auc']:.4f}")
     
     print(f"\n{'='*60}")
     print("测试完成!")

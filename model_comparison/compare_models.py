@@ -12,7 +12,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
 
 def load_results():
-    """加载三个模型的评估结果"""
+    """加载四个模型的评估结果"""
     print("=" * 60)
     print("模型对比分析")
     print("=" * 60)
@@ -27,14 +27,6 @@ def load_results():
     else:
         print(f"\n[警告] 未找到 XGBoost 结果文件")
 
-    # 加载随机森林结果
-    rf_path = '../models/random_forest/results_randomforest_metrics.csv'
-    if os.path.exists(rf_path):
-        results['随机森林'] = pd.read_csv(rf_path)
-        print(f"[随机森林] 结果已加载")
-    else:
-        print(f"[警告] 未找到 随机森林 结果文件")
-
     # 加载DNN结果
     dnn_path = '../models/dnn/results_dnn_metrics.csv'
     if os.path.exists(dnn_path):
@@ -42,6 +34,22 @@ def load_results():
         print(f"[DNN] 结果已加载")
     else:
         print(f"[警告] 未找到 DNN 结果文件")
+
+    # 加载Isolation Forest结果
+    if_path = '../models/isolation_forest/results_isolation_forest_metrics.csv'
+    if os.path.exists(if_path):
+        results['Isolation Forest'] = pd.read_csv(if_path)
+        print(f"[Isolation Forest] 结果已加载")
+    else:
+        print(f"[警告] 未找到 Isolation Forest 结果文件")
+
+    # 加载AutoEncoder结果
+    ae_path = '../models/autoencoder/results_autoencoder_metrics.csv'
+    if os.path.exists(ae_path):
+        results['AutoEncoder'] = pd.read_csv(ae_path)
+        print(f"[AutoEncoder] 结果已加载")
+    else:
+        print(f"[警告] 未找到 AutoEncoder 结果文件")
 
     if not results:
         print("\n错误: 没有找到任何模型结果文件!")
@@ -91,7 +99,7 @@ def plot_metrics_comparison(comparison_df):
     print("=" * 60)
 
     models = comparison_df['模型'].tolist()
-    colors = ['#3498db', '#2ecc71', '#9b59b6']  # 蓝色、绿色、紫色
+    colors = ['#3498db', '#9b59b6', '#f59e0b', '#14b8a6']  # XGBoost蓝, DNN紫, Isolation橙, AutoEncoder青
 
     # 1. 准确率、精确率、召回率、F1对比
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -111,15 +119,16 @@ def plot_metrics_comparison(comparison_df):
         ax.set_title(f'{metric}对比', fontsize=14, fontweight='bold')
         ax.set_ylim(0, 1.05)
         ax.grid(axis='y', alpha=0.3)
+        plt.setp(ax.get_xticklabels(), rotation=15, ha='right')
 
-    plt.suptitle('三种模型性能指标对比', fontsize=16, fontweight='bold', y=1.02)
+    plt.suptitle('四种模型性能指标对比', fontsize=16, fontweight='bold', y=1.02)
     plt.tight_layout()
     plt.savefig('results_comparison_metrics.png', dpi=150, bbox_inches='tight')
     print("评估指标对比图已保存: results_comparison_metrics.png")
     plt.close()
 
     # 2. AUC对比
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
     auc_values = comparison_df['AUC'].tolist()
     bars = ax.bar(models, auc_values, color=colors, edgecolor='black', linewidth=1.2)
 
@@ -131,6 +140,7 @@ def plot_metrics_comparison(comparison_df):
     ax.set_title('AUC对比', fontsize=14, fontweight='bold')
     ax.set_ylim(0, 1.05)
     ax.grid(axis='y', alpha=0.3)
+    plt.setp(ax.get_xticklabels(), rotation=15, ha='right')
 
     plt.tight_layout()
     plt.savefig('results_comparison_auc.png', dpi=150, bbox_inches='tight')
@@ -138,7 +148,7 @@ def plot_metrics_comparison(comparison_df):
     plt.close()
 
     # 3. 训练时间对比
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
     time_values = comparison_df['训练时间(s)'].tolist()
     bars = ax.bar(models, time_values, color=colors, edgecolor='black', linewidth=1.2)
 
@@ -149,6 +159,7 @@ def plot_metrics_comparison(comparison_df):
     ax.set_ylabel('训练时间 (秒)', fontsize=12)
     ax.set_title('训练时间对比', fontsize=14, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
+    plt.setp(ax.get_xticklabels(), rotation=15, ha='right')
 
     plt.tight_layout()
     plt.savefig('results_comparison_training_time.png', dpi=150, bbox_inches='tight')
@@ -162,7 +173,12 @@ def plot_all_roc_curves(results):
 
     plt.figure(figsize=(10, 8))
 
-    colors = {'XGBoost': '#3498db', '随机森林': '#2ecc71', 'DNN': '#9b59b6'}
+    colors = {
+        'XGBoost': '#3498db',
+        'DNN': '#9b59b6',
+        'Isolation Forest': '#f59e0b',
+        'AutoEncoder': '#14b8a6'
+    }
 
     from sklearn.metrics import roc_curve, roc_auc_score
 
@@ -180,7 +196,7 @@ def plot_all_roc_curves(results):
     plt.plot([0, 1], [0, 1], 'k--', label='随机分类', linewidth=1.5)
     plt.xlabel('假正率 (FPR)', fontsize=12)
     plt.ylabel('真正率 (TPR)', fontsize=12)
-    plt.title('三种模型ROC曲线对比', fontsize=14, fontweight='bold')
+    plt.title('四种模型ROC曲线对比', fontsize=14, fontweight='bold')
     plt.legend(loc='lower right', fontsize=11)
     plt.grid(True, alpha=0.3)
 
@@ -225,8 +241,9 @@ def generate_summary_report(comparison_df):
 
         f.write("【模型特点总结】\n")
         f.write("  XGBoost: 梯度提升树，性能优异，适合竞赛\n")
-        f.write("  随机森林: 集成学习，稳定可靠，易于调参\n")
         f.write("  DNN: 深度神经网络，能学习复杂特征组合\n")
+        f.write("  Isolation Forest: 孤立森林，无监督异常检测，适合发现未知攻击\n")
+        f.write("  AutoEncoder: 自编码器，深度学习异常检测，重构误差识别异常\n")
 
     print(f"\n总结报告已保存: results_model_comparison_report.txt")
 

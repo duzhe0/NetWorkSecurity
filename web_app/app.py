@@ -4,27 +4,56 @@ import json
 import time
 import base64
 import threading
+import warnings
 import pandas as pd
 import numpy as np
 from io import BytesIO
 
 import pickle
+import joblib
 from flask import Flask, render_template, request, jsonify, send_file
+
+# PyTorch 必须在主线程导入，否则 macOS 上会 segfault（exit code 245）
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+
+# 避免 OpenMP 线程冲突
+torch.set_num_threads(1)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'network_security_key'
 
+
+# 预定义 DNN 模型类（模块级别，避免在线程内定义导致闭包引用问题）
+class DNNMultiClass(nn.Module):
+    def __init__(self, input_dim, num_classes, hidden_dims=(256, 128, 64), dropout_rate=0.3):
+        super(DNNMultiClass, self).__init__()
+        layers = []
+        prev_dim = input_dim
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_rate))
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, num_classes))
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.network(x)
+
+
 training_status = {
     'xgboost': 'idle',
-    'random_forest': 'idle',
     'dnn': 'idle',
     'isolation_forest': 'idle',
     'autoencoder': 'idle',
     'preprocessing': 'idle',
     'test_xgboost': 'idle',
-    'test_random_forest': 'idle',
     'test_dnn': 'idle',
     'test_isolation_forest': 'idle',
     'test_autoencoder': 'idle'
@@ -32,15 +61,14 @@ training_status = {
 
 training_messages = {
     'xgboost': [],
-    'random_forest': [],
     'dnn': [],
     'isolation_forest': [],
     'autoencoder': [],
     'preprocessing': [],
     'test_xgboost': [],
-    'test_random_forest': [],
     'test_dnn': [],
-    'test_isolation_forest': []
+    'test_isolation_forest': [],
+    'test_autoencoder': []
 }
 
 def add_message(task, msg):
@@ -58,7 +86,7 @@ def preprocess_data():
     if training_status['preprocessing'] == 'running':
         return jsonify({'status': 'error', 'message': '预处理正在进行中'})
     
-    dataset = request.json.get('dataset', '20percent')
+    dataset = request.json.get('dataset', 'full')
     training_status['preprocessing'] = 'running'
     training_messages['preprocessing'] = []
     
@@ -91,31 +119,40 @@ def preprocess_data():
             add_message('preprocessing', '数据探索中...')
             df = explore_data(df)
             
-            add_message('preprocessing', '标签预处理中...')
-            df, label_encoder = preprocess_labels(df)
-            
-            add_message('preprocessing', '数据集划分（训练70%/验证10%/测试20%）...')
+            add_message('preprocessing', '标签预处理中（生成 二分类 / 5大分类 / 23细分类 三种标签）...')
+            df, le_category, le_multiclass = preprocess_labels(df)
+            add_message('preprocessing', f'23 细分类共 {len(le_multiclass.classes_)} 个类别')
+
+            add_message('preprocessing', '数据集划分（训练70%/验证10%/测试20%，以 23 分类做分层采样）...')
             df_train, df_val, df_test = split_data(df, test_size=0.2, val_size=0.1)
-            
+
             add_message('preprocessing', '特征编码与标准化（仅训练集fit，验证/测试集只transform）...')
             df_train_p, df_val_p, df_test_p, ohe, scaler, ohe_names = encode_and_scale(df_train, df_val, df_test)
-            
+
             output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Train')
-            
+
             df_train_p.to_csv(os.path.join(output_dir, 'KDDTrain_preprocessed_train.csv'), index=False)
             df_val_p.to_csv(os.path.join(output_dir, 'KDDTrain_preprocessed_val.csv'), index=False)
             df_test_p.to_csv(os.path.join(output_dir, 'KDDTrain_preprocessed_test.csv'), index=False)
-            
+
             import joblib
             joblib.dump(ohe, os.path.join(output_dir, 'encoder_onehot.pkl'))
             joblib.dump(scaler, os.path.join(output_dir, 'scaler_standard.pkl'))
-            
+            # 保存 23 分类标签编码器
+            joblib.dump(le_multiclass, os.path.join(output_dir, 'encoder_multiclass_23.pkl'))
+            # 同时保存纯文本类别列表（跨 sklearn 版本兼容）
+            class_list_path = os.path.join(output_dir, 'encoder_multiclass_23_classes.txt')
+            with open(class_list_path, 'w') as f:
+                for c in le_multiclass.classes_:
+                    f.write(c + '\n')
+
             add_message('preprocessing', f'预处理完成！')
             add_message('preprocessing', f'训练集: {df_train_p.shape}')
             add_message('preprocessing', f'验证集: {df_val_p.shape}')
             add_message('preprocessing', f'测试集: {df_test_p.shape}')
             add_message('preprocessing', f'StandardScaler/OneHotEncoder 仅在训练集上 fit')
             add_message('preprocessing', f'验证集用于训练监控，测试集仅用于最终评估')
+            add_message('preprocessing', f'已生成 23 细分类标签: normal + 22 种具体攻击类型')
             
             training_status['preprocessing'] = 'completed'
             
@@ -209,7 +246,7 @@ def get_data_distribution():
 def train_model():
     model_name = request.json.get('model_name')
     
-    if model_name not in ['xgboost', 'random_forest', 'dnn', 'isolation_forest', 'autoencoder']:
+    if model_name not in ['xgboost', 'dnn', 'isolation_forest', 'autoencoder']:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
     
     if training_status[model_name] == 'running':
@@ -221,10 +258,12 @@ def train_model():
     def run_training():
         try:
             add_message(model_name, f'开始训练 {model_name} 模型（防数据泄漏版本）...')
-            
+
             import warnings
             warnings.filterwarnings('ignore')
-            
+            import numpy as np
+            np.seterr(all='ignore')
+
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             train_path = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_train.csv')
             val_path = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_val.csv')
@@ -241,17 +280,36 @@ def train_model():
             df_train = pd.read_csv(train_path)
             df_val = pd.read_csv(val_path)
             df_test = pd.read_csv(test_path)
-            
-            exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded']
+
+            exclude_cols = ['label', 'difficulty', 'label_binary',
+                            'label_category', 'label_category_encoded',
+                            'label_multiclass', 'label_multiclass_encoded']
             feature_cols = [col for col in df_train.columns if col not in exclude_cols]
-            
-            X_train = df_train[feature_cols].values
-            y_train = df_train['label_binary'].values
-            X_val = df_val[feature_cols].values
-            y_val = df_val['label_binary'].values
-            X_test = df_test[feature_cols].values
-            y_test = df_test['label_binary'].values
-            
+
+            X_train = df_train[feature_cols].values.astype(np.float32)
+            y_train = df_train['label_multiclass_encoded'].values.astype(np.int64)
+            X_val = df_val[feature_cols].values.astype(np.float32)
+            y_val = df_val['label_multiclass_encoded'].values.astype(np.int64)
+            X_test = df_test[feature_cols].values.astype(np.float32)
+            y_test = df_test['label_multiclass_encoded'].values.astype(np.int64)
+
+            # 加载类别列表获取真正的类别总数（跨 sklearn 版本兼容）
+            encoder_class_path = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
+            if os.path.exists(encoder_class_path):
+                with open(encoder_class_path, 'r') as f:
+                    class_names = [line.strip() for line in f if line.strip()]
+                num_classes = len(class_names)
+                normal_idx = class_names.index('normal') if 'normal' in class_names else 0
+            else:
+                num_classes = int(max(y_train.max(), y_val.max(), y_test.max()) + 1)
+                normal_idx = 0
+
+            # XGBoost 必须用数据中实际出现的不重复类别数（标签必须0..N-1 连续无空隙）
+            xgb_num_class = len(np.unique(y_train))
+            if xgb_num_class != num_classes:
+                add_message(model_name, f'警告: 数据有空隙，实际 {xgb_num_class} 个不重复标签（全部 {num_classes} 个类别）')
+
+            add_message(model_name, f'【23 分类任务】共 {num_classes} 个类别 (normal + {num_classes - 1} 种攻击)')
             add_message(model_name, f'数据加载完成: 训练集 {len(X_train)}, 验证集 {len(X_val)}, 测试集 {len(X_test)}')
             add_message(model_name, f'特征数量: {len(feature_cols)}')
             add_message(model_name, f'验证集用于训练监控，测试集锁死至最终评估')
@@ -259,92 +317,60 @@ def train_model():
             if model_name == 'xgboost':
                 os.environ['DYLD_LIBRARY_PATH'] = '/opt/homebrew/opt/libomp/lib:' + os.environ.get('DYLD_LIBRARY_PATH', '')
                 import xgboost as xgb
-                
+
+                # XGBoost multi:softprob 要求 y 从 0 到 num_class-1 连续且全部出现
+                # 解决方案：用训练集出现的标签建映射，val/test 独有的标签映射到 0
+                train_labels = sorted(np.unique(y_train))
+                label_map = {old: i for i, old in enumerate(train_labels)}
+                y_train = np.array([label_map[y] for y in y_train], dtype=np.int64)
+                y_val   = np.array([label_map.get(y, 0) for y in y_val], dtype=np.int64)
+                y_test  = np.array([label_map.get(y, 0) for y in y_test], dtype=np.int64)
+                actual_num_class = len(label_map)
+                add_message(model_name, f'标签重编码: {actual_num_class} 个连续标签 (训练集出现)')
+
                 params = {
-                    'n_estimators': 100,
-                    'max_depth': 6,
+                    'n_estimators': 200,
+                    'max_depth': 8,
                     'learning_rate': 0.1,
-                    'objective': 'binary:logistic',
-                    'eval_metric': 'logloss',
+                    'objective': 'multi:softprob',
+                    'num_class': actual_num_class,
+                    'eval_metric': 'mlogloss',
                     'use_label_encoder': False,
                     'random_state': 42,
-                    'n_jobs': -1
+                    'n_jobs': -1,
+                    'tree_method': 'hist'
                 }
-                
-                add_message(model_name, f'XGBoost参数: {params}')
+
+                add_message(model_name, f'XGBoost (23 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
                 add_message(model_name, '开始训练（eval_set 使用验证集，非测试集）...')
-                
+
                 start_time = time.time()
                 model = xgb.XGBClassifier(**params)
                 # 关键修复：eval_set 使用验证集，而非测试集
                 model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
                 train_time = time.time() - start_time
-                
-                add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
-                
-            elif model_name == 'random_forest':
-                from sklearn.ensemble import RandomForestClassifier
-                
-                params = {
-                    'n_estimators': 100,
-                    'max_depth': 10,
-                    'min_samples_split': 5,
-                    'min_samples_leaf': 2,
-                    'random_state': 42,
-                    'n_jobs': -1
-                }
-                
-                add_message(model_name, f'随机森林参数: {params}')
-                add_message(model_name, '开始训练...')
-                
-                start_time = time.time()
-                model = RandomForestClassifier(**params)
-                model.fit(X_train, y_train)
-                train_time = time.time() - start_time
-                
+
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
                 
             elif model_name == 'dnn':
-                import torch
-                import torch.nn as nn
-                import torch.optim as optim
-                from torch.utils.data import DataLoader, TensorDataset
-                
-                class DNN(nn.Module):
-                    def __init__(self, input_dim, hidden_dims=[256, 128, 64], dropout_rate=0.3):
-                        super(DNN, self).__init__()
-                        layers = []
-                        prev_dim = input_dim
-                        for hidden_dim in hidden_dims:
-                            layers.append(nn.Linear(prev_dim, hidden_dim))
-                            layers.append(nn.BatchNorm1d(hidden_dim))
-                            layers.append(nn.ReLU())
-                            layers.append(nn.Dropout(dropout_rate))
-                            prev_dim = hidden_dim
-                        layers.append(nn.Linear(prev_dim, 1))
-                        layers.append(nn.Sigmoid())
-                        self.network = nn.Sequential(*layers)
-                    
-                    def forward(self, x):
-                        return self.network(x)
-                
                 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
                 add_message(model_name, f'使用设备: {device}')
-                
+
                 input_dim = X_train.shape[1]
-                model = DNN(input_dim).to(device)
-                criterion = nn.BCELoss()
+                model = DNNMultiClass(input_dim, num_classes).to(device)
+                # 多分类使用 CrossEntropyLoss
+                criterion = nn.CrossEntropyLoss()
                 optimizer = optim.Adam(model.parameters(), lr=0.001)
-                
+
                 X_train_tensor = torch.FloatTensor(X_train).to(device)
-                y_train_tensor = torch.FloatTensor(y_train).unsqueeze(1).to(device)
-                # 关键修复：使用验证集 tensor，非测试集
+                y_train_tensor = torch.LongTensor(y_train).to(device)
                 X_val_tensor = torch.FloatTensor(X_val).to(device)
-                y_val_tensor = torch.FloatTensor(y_val).unsqueeze(1).to(device)
-                
+                y_val_tensor = torch.LongTensor(y_val).to(device)
+
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
                 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-                
+
+                add_message(model_name, f'【DNN 多分类】输出维度={num_classes}, loss=CrossEntropyLoss')
                 add_message(model_name, '开始训练（epoch 监控使用验证集，非测试集）...')
                 start_time = time.time()
                 
@@ -371,10 +397,9 @@ def train_model():
             
             elif model_name == 'isolation_forest':
                 from sklearn.ensemble import IsolationForest
-                import numpy as np
 
                 # 仅使用正常流量训练（经典异常检测方法）
-                X_train_normal = X_train[y_train == 0]
+                X_train_normal = X_train[y_train == normal_idx]
                 add_message(model_name, f'Isolation Forest 参数:')
                 add_message(model_name, f'  n_estimators: 500')
                 add_message(model_name, f'  max_samples: 256')
@@ -421,17 +446,13 @@ def train_model():
                     pickle.dump({'threshold': best_threshold}, f)
             
             elif model_name == 'autoencoder':
-                import numpy as np
-                import torch
-                import torch.nn as nn
-                import torch.optim as optim
-                import pickle
+                pickle_path = pickle
                 from sklearn.metrics import accuracy_score, f1_score
                 add_message(model_name, 'AutoEncoder 异常检测模型 - 仅使用正常流量训练...')
                 
                 start_time = time.time()
                 
-                X_train_normal = X_train[y_train == 0]
+                X_train_normal = X_train[y_train == normal_idx]
                 add_message(model_name, f'仅使用正常流量训练: {len(X_train_normal)} 样本')
                 
                 class AutoEncoder(nn.Module):
@@ -469,7 +490,6 @@ def train_model():
                 optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
                 
                 X_train_tensor = torch.FloatTensor(X_train_normal).to(device)
-                from torch.utils.data import DataLoader, TensorDataset
                 train_dataset = TensorDataset(X_train_tensor)
                 train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
                 
@@ -548,55 +568,103 @@ def train_model():
             
             # ========== 最终评估：仅在测试集上做单次评估 ==========
             add_message(model_name, '最终评估：在测试集上做单次评估（测试集首次参与）...')
-            
+
             from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
-            
-            if model_name == 'dnn':
-                X_test_tensor = torch.FloatTensor(X_test).to(device)
-                model.eval()
-                with torch.no_grad():
-                    y_prob = model(X_test_tensor).cpu().numpy().flatten()
-                    y_pred = (y_prob > 0.5).astype(int)
-            elif model_name == 'isolation_forest':
-                # 加载阈值
-                params_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', model_name, 'isolation_forest_params.pkl')
-                with open(params_path, 'rb') as f:
-                    params = pickle.load(f)
-                best_threshold = params['threshold']
-                
-                scores = model.decision_function(X_test)
-                y_pred = (scores < best_threshold).astype(int)
-                y_prob = 1 - (scores - scores.min()) / (scores.max() - scores.min())
-            elif model_name == 'autoencoder':
-                # 加载阈值
-                params_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', model_name, 'autoencoder_params.pkl')
-                with open(params_path, 'rb') as f:
-                    params = pickle.load(f)
-                best_threshold = params['threshold']
-                
-                X_test_tensor = torch.FloatTensor(X_test).to(device)
-                model.eval()
-                with torch.no_grad():
-                    test_outputs = model(X_test_tensor)
-                    test_errors = torch.mean((test_outputs - X_test_tensor) ** 2, dim=1).cpu().numpy()
-                y_pred = (test_errors > best_threshold).astype(int)
-                y_prob = (test_errors - test_errors.min()) / (test_errors.max() - test_errors.min() + 1e-10)
+
+            # 判断模型是否支持 23 分类
+            multiclass_models = ['xgboost', 'dnn']
+            binary_models = ['isolation_forest', 'autoencoder']
+
+            if model_name in multiclass_models:
+                # ========== 多分类评估（23 分类）==========
+                if model_name == 'dnn':
+                    X_test_tensor = torch.FloatTensor(X_test).to(device)
+                    model.eval()
+                    with torch.no_grad():
+                        logits = model(X_test_tensor).cpu().numpy()
+                    # 多分类：取 argmax 作为预测
+                    y_pred = np.argmax(logits, axis=1)
+                    # 概率用 softmax
+                    exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
+                    y_prob_matrix = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+                else:  # xgboost
+                    y_pred = model.predict(X_test)
+                    y_prob_matrix = model.predict_proba(X_test)
+
+                # 评估用类别数：XGBoost 可能因标签空隙而小于总类别数
+                eval_classes = model.n_classes_ if hasattr(model, 'n_classes_') else num_classes
+
+                accuracy = accuracy_score(y_test, y_pred)
+                precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+                recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+                f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+                try:
+                    auc = roc_auc_score(y_test, y_prob_matrix, multi_class='ovr', average='weighted', labels=list(range(eval_classes)))
+                except Exception:
+                    auc = float('nan')
+                cm = confusion_matrix(y_test, y_pred, labels=list(range(eval_classes))).tolist()
+
+            elif model_name in binary_models:
+                # ========== 异常检测（仅 normal/attack 二分类评估）==========
+                add_message(model_name, '【异常检测模型】天然为 normal/attack 二分类评估')
+                if model_name == 'isolation_forest':
+                    params_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', model_name, 'isolation_forest_params.pkl')
+                    with open(params_path, 'rb') as f:
+                        params = pickle.load(f)
+                    best_threshold = params['threshold']
+
+                    scores = model.decision_function(X_test)
+                    y_pred = (scores < best_threshold).astype(int)
+                    y_prob = 1 - (scores - scores.min()) / (scores.max() - scores.min())
+                    # 直接用二分类评估（normal_idx 是正常流量的类别编号）
+                    y_test_bin = (y_test != normal_idx).astype(int)
+                    accuracy = accuracy_score(y_test_bin, y_pred)
+                    precision = precision_score(y_test_bin, y_pred, zero_division=0)
+                    recall = recall_score(y_test_bin, y_pred, zero_division=0)
+                    f1 = f1_score(y_test_bin, y_pred, zero_division=0)
+                    try:
+                        auc = roc_auc_score(y_test_bin, y_prob)
+                    except Exception:
+                        auc = float('nan')
+                    cm = confusion_matrix(y_test_bin, y_pred).tolist()
+                else:  # autoencoder
+                    params_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', model_name, 'autoencoder_params.pkl')
+                    with open(params_path, 'rb') as f:
+                        params = pickle.load(f)
+                    best_threshold = params['threshold']
+
+                    X_test_tensor = torch.FloatTensor(X_test).to(device)
+                    model.eval()
+                    with torch.no_grad():
+                        test_outputs = model(X_test_tensor)
+                        test_errors = torch.mean((test_outputs - X_test_tensor) ** 2, dim=1).cpu().numpy()
+                    y_pred_bin = (test_errors > best_threshold).astype(int)
+                    y_prob = (test_errors - test_errors.min()) / (test_errors.max() - test_errors.min() + 1e-10)
+                    y_test_bin = (y_test != normal_idx).astype(int)
+                    accuracy = accuracy_score(y_test_bin, y_pred_bin)
+                    precision = precision_score(y_test_bin, y_pred_bin, zero_division=0)
+                    recall = recall_score(y_test_bin, y_pred_bin, zero_division=0)
+                    f1 = f1_score(y_test_bin, y_pred_bin, zero_division=0)
+                    try:
+                        auc = roc_auc_score(y_test_bin, y_prob)
+                    except Exception:
+                        auc = float('nan')
+                    cm = confusion_matrix(y_test_bin, y_pred_bin).tolist()
             else:
                 y_pred = model.predict(X_test)
                 y_prob = model.predict_proba(X_test)[:, 1]
-            
-            accuracy = accuracy_score(y_test, y_pred)
-            precision = precision_score(y_test, y_pred)
-            recall = recall_score(y_test, y_pred)
-            f1 = f1_score(y_test, y_pred)
-            auc = roc_auc_score(y_test, y_prob)
-            cm = confusion_matrix(y_test, y_pred).tolist()
-            
+                accuracy = accuracy_score(y_test, y_pred)
+                precision = precision_score(y_test, y_pred)
+                recall = recall_score(y_test, y_pred)
+                f1 = f1_score(y_test, y_pred)
+                auc = roc_auc_score(y_test, y_prob)
+                cm = confusion_matrix(y_test, y_pred).tolist()
+
             add_message(model_name, f'测试集评估结果:')
             add_message(model_name, f'  准确率: {accuracy:.4f}')
-            add_message(model_name, f'  精确率: {precision:.4f}')
-            add_message(model_name, f'  召回率: {recall:.4f}')
-            add_message(model_name, f'  F1-Score: {f1:.4f}')
+            add_message(model_name, f'  精确率 (weighted): {precision:.4f}')
+            add_message(model_name, f'  召回率 (weighted): {recall:.4f}')
+            add_message(model_name, f'  F1-Score (weighted): {f1:.4f}')
             add_message(model_name, f'  AUC: {auc:.4f}')
             add_message(model_name, f'  混淆矩阵: {cm}')
             
@@ -642,7 +710,7 @@ def train_model():
 
 @app.route('/train/status/<model_name>')
 def get_train_status(model_name):
-    if model_name not in ['xgboost', 'random_forest', 'dnn', 'isolation_forest', 'autoencoder']:
+    if model_name not in ['xgboost', 'dnn', 'isolation_forest', 'autoencoder']:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
     
     return jsonify({
@@ -657,7 +725,7 @@ def get_comparison_results():
         
         models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
         
-        for model_name in ['xgboost', 'random_forest', 'dnn', 'isolation_forest']:
+        for model_name in ['xgboost', 'dnn', 'isolation_forest', 'autoencoder']:
             metric_path = os.path.join(models_dir, model_name, f'results_{model_name}_metrics.csv')
             if os.path.exists(metric_path):
                 df = pd.read_csv(metric_path)
@@ -748,25 +816,25 @@ def reset_status():
     global training_status, training_messages
     training_status = {
         'xgboost': 'idle',
-        'random_forest': 'idle',
         'dnn': 'idle',
         'isolation_forest': 'idle',
+        'autoencoder': 'idle',
         'preprocessing': 'idle',
         'test_xgboost': 'idle',
-        'test_random_forest': 'idle',
         'test_dnn': 'idle',
-        'test_isolation_forest': 'idle'
+        'test_isolation_forest': 'idle',
+        'test_autoencoder': 'idle'
     }
     training_messages = {
         'xgboost': [],
-        'random_forest': [],
         'dnn': [],
         'isolation_forest': [],
+        'autoencoder': [],
         'preprocessing': [],
         'test_xgboost': [],
-        'test_random_forest': [],
         'test_dnn': [],
-        'test_isolation_forest': []
+        'test_isolation_forest': [],
+        'test_autoencoder': []
     }
     return jsonify({'status': 'success'})
 
@@ -776,7 +844,7 @@ def test_model():
     model_name = request.json.get('model_name')
     test_file = request.json.get('test_file', 'train_test')  # 默认使用 train_test 文件
     
-    if model_name not in ['xgboost', 'random_forest', 'dnn', 'isolation_forest', 'autoencoder']:
+    if model_name not in ['xgboost', 'dnn', 'isolation_forest', 'autoencoder']:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
     
     task_key = f'test_{model_name}'
@@ -789,10 +857,12 @@ def test_model():
     def run_testing():
         try:
             add_message(task_key, f'开始测试 {model_name} 模型...')
-            
+
             import warnings
             warnings.filterwarnings('ignore')
-            
+            import numpy as np
+            np.seterr(all='ignore')
+
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             
             # 加载测试数据
@@ -824,10 +894,22 @@ def test_model():
             scaler = joblib.load(scaler_path)
             add_message(task_key, '已加载预处理器')
             
-            # 标签处理
+            # 标签处理（多分类）
             df_test['label_binary'] = df_test['label'].apply(lambda x: 0 if x == 'normal' else 1)
-            y_test = df_test['label_binary'].values
-            add_message(task_key, f'测试集标签分布: normal={(y_test==0).sum()}, attack={(y_test==1).sum()}')
+            
+            # 加载23类编码器，为测试数据生成多分类标签
+            class_file = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
+            if os.path.exists(class_file):
+                with open(class_file, 'r') as f:
+                    class_names = [line.strip() for line in f if line.strip()]
+                label_to_idx = {name: i for i, name in enumerate(class_names)}
+                df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(0).astype(int)
+            else:
+                df_test['label_multiclass_encoded'] = df_test['label_binary']
+            
+            y_test = df_test['label_multiclass_encoded'].values
+            unique_labels, label_counts = np.unique(y_test, return_counts=True)
+            add_message(task_key, f'测试集多分类标签分布: {len(unique_labels)} 个类别, 样本数={len(y_test)}')
             
             # One-Hot 编码（使用训练时 fit 的编码器）
             ohe_feature_names = ohe.get_feature_names_out(CATEGORICAL_FEATURES)
@@ -841,7 +923,8 @@ def test_model():
             train_csv_path = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_train.csv')
             if os.path.exists(train_csv_path):
                 df_train_sample = pd.read_csv(train_csv_path, nrows=1)
-                exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded']
+                exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded',
+                                'label_multiclass', 'label_multiclass_encoded']
                 train_feature_cols = [c for c in df_train_sample.columns if c not in exclude_cols]
             
             if train_feature_cols:
@@ -855,10 +938,18 @@ def test_model():
             df_test_enc[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
             add_message(task_key, f'测试数据预处理完成')
             
-            # 准备特征矩阵
-            exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded']
-            feature_cols = [col for col in df_test_enc.columns if col not in exclude_cols]
-            X_test = df_test_enc[feature_cols].values
+            # 准备特征矩阵（优先使用训练集特征列，确保维度一致）
+            if train_feature_cols:
+                feature_cols = train_feature_cols
+                for col in feature_cols:
+                    if col not in df_test_enc.columns:
+                        df_test_enc[col] = 0.0
+                X_test = df_test_enc[feature_cols].values.astype(np.float32)
+            else:
+                exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded',
+                                'label_multiclass', 'label_multiclass_encoded']
+                feature_cols = [col for col in df_test_enc.columns if col not in exclude_cols]
+                X_test = df_test_enc[feature_cols].values.astype(np.float32)
             
             add_message(task_key, f'测试特征矩阵: {X_test.shape}')
             
@@ -866,6 +957,8 @@ def test_model():
             model_dir = os.path.join(base_dir, 'models', model_name)
             if model_name == 'dnn':
                 model_path = os.path.join(model_dir, 'model_dnn.pth')
+            elif model_name == 'autoencoder':
+                model_path = os.path.join(model_dir, 'model_autoencoder.pth')
             else:
                 model_path = os.path.join(model_dir, f'model_{model_name}.pkl')
             
@@ -880,11 +973,9 @@ def test_model():
             from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
             
             if model_name == 'dnn':
-                import torch
-                import torch.nn as nn
                 
                 class DNN(nn.Module):
-                    def __init__(self, input_dim, hidden_dims=[256, 128, 64], dropout_rate=0.3):
+                    def __init__(self, input_dim, num_classes, hidden_dims=[256, 128, 64], dropout_rate=0.3):
                         super(DNN, self).__init__()
                         layers = []
                         prev_dim = input_dim
@@ -894,25 +985,30 @@ def test_model():
                             layers.append(nn.ReLU())
                             layers.append(nn.Dropout(dropout_rate))
                             prev_dim = hidden_dim
-                        layers.append(nn.Linear(prev_dim, 1))
-                        layers.append(nn.Sigmoid())
+                        layers.append(nn.Linear(prev_dim, num_classes))
                         self.network = nn.Sequential(*layers)
                     
                     def forward(self, x):
                         return self.network(x)
                 
                 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                model = DNN(input_dim=X_test.shape[1]).to(device)
-                model.load_state_dict(torch.load(model_path, map_location=device))
+                state_dict = torch.load(model_path, map_location=device)
+                input_dim = state_dict['network.0.weight'].shape[1]
+                num_classes = state_dict['network.12.weight'].shape[0]
+                model = DNN(input_dim=input_dim, num_classes=num_classes).to(device)
+                model.load_state_dict(state_dict)
                 model.eval()
                 
                 X_test_tensor = torch.FloatTensor(X_test).to(device)
                 with torch.no_grad():
-                    y_prob = model(X_test_tensor).cpu().numpy().flatten()
-                y_pred = (y_prob > 0.5).astype(int)
+                    logits = model(X_test_tensor).cpu().numpy()
+                exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
+                y_prob_matrix = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+                
+                # 多分类预测
+                y_pred = np.argmax(y_prob_matrix, axis=1)
                 
             elif model_name == 'isolation_forest':
-                import numpy as np
                 model = joblib.load(model_path)
                 
                 params_path = os.path.join(model_dir, 'isolation_forest_params.pkl')
@@ -925,8 +1021,7 @@ def test_model():
                 y_prob = 1 - (scores - scores.min()) / (scores.max() - scores.min())
                 
             elif model_name == 'autoencoder':
-                import numpy as np
-                
+
                 params_path = os.path.join(model_dir, 'autoencoder_params.pkl')
                 with open(params_path, 'rb') as f:
                     params = pickle.load(f)
@@ -973,28 +1068,85 @@ def test_model():
                 y_pred = (test_errors > best_threshold).astype(int)
                 y_prob = (test_errors - test_errors.min()) / (test_errors.max() - test_errors.min() + 1e-10)
                 
-            else:
+            elif model_name == 'xgboost':
                 model = joblib.load(model_path)
-                y_pred = model.predict(X_test)
-                y_prob = model.predict_proba(X_test)[:, 1]
+                
+                # XGBoost多分类预测
+                y_pred_encoded = model.predict(X_test)
+                y_prob_matrix = model.predict_proba(X_test)
+                
+                # 重建训练时的标签映射，将模型输出映射回原始23类编码
+                train_csv_path = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_train.csv')
+                if os.path.exists(train_csv_path):
+                    df_train_full = pd.read_csv(train_csv_path, usecols=['label_multiclass_encoded'])
+                    train_labels = sorted(df_train_full['label_multiclass_encoded'].unique())
+                    # 反向映射：模型输出索引 -> 原始编码
+                    idx_to_original = {i: old for i, old in enumerate(train_labels)}
+                    y_pred = np.array([idx_to_original.get(p, 0) for p in y_pred_encoded], dtype=np.int64)
+                else:
+                    y_pred = y_pred_encoded.astype(np.int64)
             
             add_message(task_key, f'预测完成')
             
-            # 计算评估指标
-            accuracy = accuracy_score(y_test, y_pred)
-            precision = precision_score(y_test, y_pred)
-            recall = recall_score(y_test, y_pred)
-            f1 = f1_score(y_test, y_pred)
-            auc = roc_auc_score(y_test, y_prob)
-            cm = confusion_matrix(y_test, y_pred).tolist()
+            # 二分类模型（IsolationForest、AutoEncoder）需要将多分类标签转为二分类
+            is_multiclass = model_name in ('dnn', 'xgboost')
+            if not is_multiclass:
+                # normal 类别索引为 11，其余为攻击
+                class_file = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
+                normal_idx = 11
+                if os.path.exists(class_file):
+                    with open(class_file, 'r') as f:
+                        class_names = [line.strip() for line in f if line.strip()]
+                    if 'normal' in class_names:
+                        normal_idx = class_names.index('normal')
+                y_test = (y_test != normal_idx).astype(int)
             
-            add_message(task_key, f'测试集评估结果:')
-            add_message(task_key, f'  准确率: {accuracy:.4f}')
-            add_message(task_key, f'  精确率: {precision:.4f}')
-            add_message(task_key, f'  召回率: {recall:.4f}')
-            add_message(task_key, f'  F1-Score: {f1:.4f}')
-            add_message(task_key, f'  AUC: {auc:.4f}')
-            add_message(task_key, f'  混淆矩阵: [[TN={cm[0][0]}, FP={cm[0][1]}], [FN={cm[1][0]}, TP={cm[1][1]}]]')
+            # 计算评估指标
+            # 多分类模型用 weighted average，二分类模型用默认 binary
+            avg = 'weighted' if is_multiclass else 'binary'
+            
+            accuracy = accuracy_score(y_test, y_pred)
+            precision = precision_score(y_test, y_pred, average=avg, zero_division=0)
+            recall = recall_score(y_test, y_pred, average=avg, zero_division=0)
+            f1 = f1_score(y_test, y_pred, average=avg, zero_division=0)
+            
+            if is_multiclass:
+                # 多分类 AUC: OvR weighted
+                try:
+                    n_cols = y_prob_matrix.shape[1]
+                    auc = roc_auc_score(y_test, y_prob_matrix, multi_class='ovr',
+                                        average='weighted', labels=list(range(n_cols)))
+                except Exception:
+                    try:
+                        # 降级：手动计算 OvR AUC
+                        from sklearn.preprocessing import label_binarize
+                        all_labels = list(range(y_prob_matrix.shape[1]))
+                        y_test_bin = label_binarize(y_test, classes=all_labels)
+                        aucs = []
+                        for c in range(y_prob_matrix.shape[1]):
+                            if c < y_test_bin.shape[1] and len(np.unique(y_test_bin[:, c])) > 1:
+                                aucs.append(roc_auc_score(y_test_bin[:, c], y_prob_matrix[:, c]))
+                        auc = np.mean(aucs) if aucs else float('nan')
+                    except Exception:
+                        auc = float('nan')
+                cm = confusion_matrix(y_test, y_pred).tolist()
+                add_message(task_key, f'测试集评估结果（多分类 {y_prob_matrix.shape[1]} 类）:')
+                add_message(task_key, f'  准确率: {accuracy:.4f}')
+                add_message(task_key, f'  精确率 (weighted): {precision:.4f}')
+                add_message(task_key, f'  召回率 (weighted): {recall:.4f}')
+                add_message(task_key, f'  F1-Score (weighted): {f1:.4f}')
+                add_message(task_key, f'  AUC (weighted OvR): {auc:.4f}')
+                add_message(task_key, f'  混淆矩阵: {len(cm)}x{len(cm)} (已保存)')
+            else:
+                auc = roc_auc_score(y_test, y_prob)
+                cm = confusion_matrix(y_test, y_pred).tolist()
+                add_message(task_key, f'测试集评估结果（二分类）:')
+                add_message(task_key, f'  准确率: {accuracy:.4f}')
+                add_message(task_key, f'  精确率: {precision:.4f}')
+                add_message(task_key, f'  召回率: {recall:.4f}')
+                add_message(task_key, f'  F1-Score: {f1:.4f}')
+                add_message(task_key, f'  AUC: {auc:.4f}')
+                add_message(task_key, f'  混淆矩阵: [[TN={cm[0][0]}, FP={cm[0][1]}], [FN={cm[1][0]}, TP={cm[1][1]}]]')
             
             # 保存测试结果
             test_results = {
