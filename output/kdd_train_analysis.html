@@ -1,0 +1,2428 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KDDTrain+ 数据集详细分析报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin: 30px 0;
+            font-size: 32px;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 15px;
+        }
+        h2 {
+            color: #2980b9;
+            margin: 30px 0 15px 0;
+            font-size: 24px;
+            border-left: 4px solid #3498db;
+            padding-left: 12px;
+        }
+        h3 {
+            color: #34495e;
+            margin: 20px 0 10px 0;
+            font-size: 18px;
+        }
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        .card .number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        .card .label {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th {
+            background: #3498db;
+            color: white;
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ecf0f1;
+            font-size: 13px;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .dos { background-color: #fdf0ef; }
+        .probe { background-color: #fef5e7; }
+        .r2l { background-color: #eafaf1; }
+        .u2r { background-color: #f5eef8; }
+        .normal-row { background-color: #eaf2f8; }
+        .bar-container {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.3s ease;
+        }
+        .bar-dos { background: linear-gradient(90deg, #e74c3c, #c0392b); }
+        .bar-probe { background: linear-gradient(90deg, #f39c12, #d68910); }
+        .bar-r2l { background: linear-gradient(90deg, #27ae60, #1e8449); }
+        .bar-u2r { background: linear-gradient(90deg, #8e44ad, #6c3483); }
+        .bar-normal { background: linear-gradient(90deg, #3498db, #2980b9); }
+        .category-section {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        .category-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .category-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            color: white;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .badge-dos { background: #e74c3c; }
+        .badge-probe { background: #f39c12; }
+        .badge-r2l { background: #27ae60; }
+        .badge-u2r { background: #8e44ad; }
+        .badge-normal { background: #3498db; }
+        .desc-text {
+            color: #555;
+            font-size: 14px;
+            margin: 8px 0;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .stat-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 3px;
+        }
+        .pie-chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+        }
+        .pie-legend {
+            margin-left: 30px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .feature-section {
+            margin: 20px 0;
+        }
+        .feature-type-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .type-continuous { background: #d6eaf8; color: #2874a6; }
+        .type-binary { background: #fadbd8; color: #c0392b; }
+        .type-discrete { background: #d5f5e3; color: #1e8449; }
+        .type-categorical { background: #fdebd0; color: #d68910; }
+        .type-constant { background: #eaecee; color: #616a6b; }
+        .toc {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        .toc li {
+            padding: 5px 0;
+        }
+        .toc a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        .highlight-box {
+            background: #eaf2f8;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .warning-box {
+            background: #fdf0ef;
+            border-left: 4px solid #e74c3c;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .success-box {
+            background: #eafaf1;
+            border-left: 4px solid #27ae60;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+<h1>KDDTrain+ 数据集详细分析报告</h1>
+
+<div class="highlight-box">
+    <strong>数据集简介：</strong>NSL-KDD是用于网络入侵检测的经典数据集，是KDD CUP 99数据集的改进版本。
+    它包含了各种网络连接记录，每条记录被标记为正常(normal)或某种具体的攻击类型。
+    该数据集广泛用于评估入侵检测系统(IDS)的性能。
+</div>
+
+
+<h2 id="overview">一、数据总体概览</h2>
+<div class="summary-cards">
+    <div class="card">
+        <div class="number">125,973</div>
+        <div class="label">总样本数</div>
+    </div>
+    <div class="card">
+        <div class="number">41</div>
+        <div class="label">特征数量</div>
+    </div>
+    <div class="card">
+        <div class="number">23</div>
+        <div class="label">类别数量</div>
+    </div>
+    <div class="card">
+        <div class="number">67,343</div>
+        <div class="label">正常样本数</div>
+    </div>
+    <div class="card">
+        <div class="number">58,630</div>
+        <div class="label">攻击样本数</div>
+    </div>
+</div>
+
+
+<div class="highlight-box">
+    <strong>数据说明：</strong>
+    <ul style="margin-left: 20px; margin-top: 8px;">
+        <li>每条记录代表一个网络连接，包含41个特征和1个标签</li>
+        <li>标签分为正常(normal)和22种攻击类型，共23个类别</li>
+        <li>攻击类型可归纳为四大类：DoS(拒绝服务)、Probe(探测扫描)、R2L(远程到本地)、U2R(用户到根)</li>
+        <li>正常样本占比：53.46%，攻击样本占比：46.54%</li>
+    </ul>
+</div>
+
+
+<h2 id="category-distribution">二、攻击大类分布</h2>
+
+<table>
+<tr><th>攻击大类</th><th>样本数量</th><th>占比</th><th>包含攻击类型数</th><th>分布可视化</th></tr>
+
+<tr>
+    <td><strong style="color: #3498db">Normal</strong><br><span style="font-size: 11px; color: #888;">正常流量，代表合法的网络连接</span></td>
+    <td>67,343</td>
+    <td>53.46%</td>
+    <td>-</td>
+    <td style="width: 200px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-normal" style="width: 100.0%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr>
+    <td><strong style="color: #e74c3c">DoS</strong><br><span style="font-size: 11px; color: #888;">拒绝服务攻击（Denial of Service），通过耗尽目标系统资源使其无法提供正常服务</span></td>
+    <td>45,927</td>
+    <td>36.46%</td>
+    <td>6</td>
+    <td style="width: 200px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-dos" style="width: 68.19862494988344%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr>
+    <td><strong style="color: #f39c12">Probe</strong><br><span style="font-size: 11px; color: #888;">探测/扫描攻击，攻击者通过扫描网络来收集信息和发现漏洞</span></td>
+    <td>11,656</td>
+    <td>9.25%</td>
+    <td>4</td>
+    <td style="width: 200px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-probe" style="width: 17.308406218909166%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr>
+    <td><strong style="color: #27ae60">R2L</strong><br><span style="font-size: 11px; color: #888;">远程到本地攻击（Remote to Local），攻击者从远程机器获取本地用户权限</span></td>
+    <td>995</td>
+    <td>0.79%</td>
+    <td>8</td>
+    <td style="width: 200px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 1.4775106544110004%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr>
+    <td><strong style="color: #8e44ad">U2R</strong><br><span style="font-size: 11px; color: #888;">用户到根攻击（User to Root），攻击者从普通用户权限提升到超级用户权限</span></td>
+    <td>52</td>
+    <td>0.04%</td>
+    <td>4</td>
+    <td style="width: 200px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-u2r" style="width: 0.07721663721544927%"></div>
+        </div>
+    </td>
+</tr>
+
+</table>
+
+<div class="warning-box">
+    <strong>数据不均衡问题：</strong>
+    可以看到数据集存在严重的类别不均衡问题。Normal和DoS类样本数量巨大，而U2R和R2L类样本非常稀少。
+    这在训练模型时需要特别注意，可能需要采用过采样、欠采样或代价敏感学习等方法来处理。
+</div>
+
+
+<h2 id="23class-distribution">三、23种类别详细分布</h2>
+
+<table>
+<tr><th>排名</th><th>类别名称</th><th>攻击大类</th><th>样本数量</th><th>占总样本比例</th><th>占攻击样本比例</th><th>可视化</th></tr>
+
+<tr class="normal-row">
+    <td>1</td>
+    <td><strong>normal</strong><br><span style="font-size: 11px; color: #666;">正常流量，无攻击行为</span></td>
+    <td><span class="category-badge badge-normal">Normal</span></td>
+    <td>67,343</td>
+    <td>53.46%</td>
+    <td>—</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-normal" style="width: 100.0%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="dos">
+    <td>2</td>
+    <td><strong>neptune</strong><br><span style="font-size: 11px; color: #666;">SYN洪水攻击，发送大量SYN包耗尽系统资源</span></td>
+    <td><span class="category-badge badge-dos">DoS</span></td>
+    <td>41,214</td>
+    <td>32.72%</td>
+    <td>70.30%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-dos" style="width: 61.20012473456781%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="probe">
+    <td>3</td>
+    <td><strong>satan</strong><br><span style="font-size: 11px; color: #666;">SATAN扫描，使用SATAN工具检测网络安全漏洞</span></td>
+    <td><span class="category-badge badge-probe">Probe</span></td>
+    <td>3,633</td>
+    <td>2.88%</td>
+    <td>6.20%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-probe" style="width: 5.394770057763985%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="probe">
+    <td>4</td>
+    <td><strong>ipsweep</strong><br><span style="font-size: 11px; color: #666;">IP地址扫描，探测网络中存活的主机</span></td>
+    <td><span class="category-badge badge-probe">Probe</span></td>
+    <td>3,599</td>
+    <td>2.86%</td>
+    <td>6.14%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-probe" style="width: 5.3442822565077295%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="probe">
+    <td>5</td>
+    <td><strong>portsweep</strong><br><span style="font-size: 11px; color: #666;">端口扫描，探测目标主机的开放端口</span></td>
+    <td><span class="category-badge badge-probe">Probe</span></td>
+    <td>2,931</td>
+    <td>2.33%</td>
+    <td>5.00%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-probe" style="width: 4.352345455355419%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="dos">
+    <td>6</td>
+    <td><strong>smurf</strong><br><span style="font-size: 11px; color: #666;">Smurf攻击，利用ICMP广播包进行分布式拒绝服务</span></td>
+    <td><span class="category-badge badge-dos">DoS</span></td>
+    <td>2,646</td>
+    <td>2.10%</td>
+    <td>4.51%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-dos" style="width: 3.9291388860015144%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="probe">
+    <td>7</td>
+    <td><strong>nmap</strong><br><span style="font-size: 11px; color: #666;">Nmap端口扫描，使用Nmap工具探测开放端口</span></td>
+    <td><span class="category-badge badge-probe">Probe</span></td>
+    <td>1,493</td>
+    <td>1.19%</td>
+    <td>2.55%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-probe" style="width: 2.2170084492820337%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="dos">
+    <td>8</td>
+    <td><strong>back</strong><br><span style="font-size: 11px; color: #666;">Land攻击的变体，发送大量带有伪造源地址的SYN包</span></td>
+    <td><span class="category-badge badge-dos">DoS</span></td>
+    <td>956</td>
+    <td>0.76%</td>
+    <td>1.63%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-dos" style="width: 1.4195981764994134%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="dos">
+    <td>9</td>
+    <td><strong>teardrop</strong><br><span style="font-size: 11px; color: #666;">泪滴攻击，发送重叠偏移的IP分片导致系统崩溃</span></td>
+    <td><span class="category-badge badge-dos">DoS</span></td>
+    <td>892</td>
+    <td>0.71%</td>
+    <td>1.52%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-dos" style="width: 1.3245623153111683%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>10</td>
+    <td><strong>warezclient</strong><br><span style="font-size: 11px; color: #666;">Warez客户端，客户端从warez服务器下载非法软件</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>890</td>
+    <td>0.71%</td>
+    <td>1.52%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 1.3215924446490355%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="dos">
+    <td>11</td>
+    <td><strong>pod</strong><br><span style="font-size: 11px; color: #666;">死亡之Ping，发送超大ICMP数据包导致系统崩溃</span></td>
+    <td><span class="category-badge badge-dos">DoS</span></td>
+    <td>201</td>
+    <td>0.16%</td>
+    <td>0.34%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-dos" style="width: 0.29847200154433273%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>12</td>
+    <td><strong>guess_passwd</strong><br><span style="font-size: 11px; color: #666;">密码猜测攻击，通过暴力破解获取用户密码</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>53</td>
+    <td>0.04%</td>
+    <td>0.09%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 0.0787015725465156%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="u2r">
+    <td>13</td>
+    <td><strong>buffer_overflow</strong><br><span style="font-size: 11px; color: #666;">缓冲区溢出攻击，通过发送超出缓冲区的数据获取root权限</span></td>
+    <td><span class="category-badge badge-u2r">U2R</span></td>
+    <td>30</td>
+    <td>0.02%</td>
+    <td>0.05%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-u2r" style="width: 0.044548059931989965%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>14</td>
+    <td><strong>warezmaster</strong><br><span style="font-size: 11px; color: #666;">Warez服务器，服务器提供非法软件下载</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>20</td>
+    <td>0.02%</td>
+    <td>0.03%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 0.029698706621326638%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="dos">
+    <td>15</td>
+    <td><strong>land</strong><br><span style="font-size: 11px; color: #666;">Land攻击，发送源地址与目标地址相同的SYN包</span></td>
+    <td><span class="category-badge badge-dos">DoS</span></td>
+    <td>18</td>
+    <td>0.01%</td>
+    <td>0.03%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-dos" style="width: 0.02672883595919398%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>16</td>
+    <td><strong>imap</strong><br><span style="font-size: 11px; color: #666;">IMAP攻击，利用IMAP协议漏洞进行未授权访问</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>11</td>
+    <td>0.01%</td>
+    <td>0.02%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 0.01633428864172965%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="u2r">
+    <td>17</td>
+    <td><strong>rootkit</strong><br><span style="font-size: 11px; color: #666;">Rootkit攻击，安装rootkit以隐藏攻击痕迹并获取持久访问</span></td>
+    <td><span class="category-badge badge-u2r">U2R</span></td>
+    <td>10</td>
+    <td>0.01%</td>
+    <td>0.02%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-u2r" style="width: 0.014849353310663319%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="u2r">
+    <td>18</td>
+    <td><strong>loadmodule</strong><br><span style="font-size: 11px; color: #666;">加载模块攻击，通过加载恶意内核模块获取root权限</span></td>
+    <td><span class="category-badge badge-u2r">U2R</span></td>
+    <td>9</td>
+    <td>0.01%</td>
+    <td>0.02%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-u2r" style="width: 0.01336441797959699%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>19</td>
+    <td><strong>ftp_write</strong><br><span style="font-size: 11px; color: #666;">FTP写攻击，攻击者尝试写入匿名FTP目录</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>8</td>
+    <td>0.01%</td>
+    <td>0.01%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 0.011879482648530656%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>20</td>
+    <td><strong>multihop</strong><br><span style="font-size: 11px; color: #666;">多跳攻击，通过多个中继主机进行攻击以隐藏身份</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>7</td>
+    <td>0.01%</td>
+    <td>0.01%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 0.010394547317464324%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>21</td>
+    <td><strong>phf</strong><br><span style="font-size: 11px; color: #666;">PHF攻击，利用Web服务器phf脚本漏洞进行命令注入</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>4</td>
+    <td>0.00%</td>
+    <td>0.01%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 0.005939741324265328%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="u2r">
+    <td>22</td>
+    <td><strong>perl</strong><br><span style="font-size: 11px; color: #666;">Perl攻击，利用Perl脚本进行的U2R攻击</span></td>
+    <td><span class="category-badge badge-u2r">U2R</span></td>
+    <td>3</td>
+    <td>0.00%</td>
+    <td>0.01%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-u2r" style="width: 0.004454805993198996%"></div>
+        </div>
+    </td>
+</tr>
+
+
+<tr class="r2l">
+    <td>23</td>
+    <td><strong>spy</strong><br><span style="font-size: 11px; color: #666;">间谍攻击，攻击者试图窃取敏感信息</span></td>
+    <td><span class="category-badge badge-r2l">R2L</span></td>
+    <td>2</td>
+    <td>0.00%</td>
+    <td>0.00%</td>
+    <td style="width: 180px;">
+        <div class="bar-container">
+            <div class="bar-fill bar-r2l" style="width: 0.002969870662132664%"></div>
+        </div>
+    </td>
+</tr>
+
+</table>
+
+<h2 id="dos-detail">四、各类攻击详细分析</h2>
+
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-dos">DoS</span>
+        <h3 style="margin:0;">DoS 攻击类 (45,927 样本, 36.46%)</h3>
+    </div>
+    <p class="desc-text">拒绝服务攻击（Denial of Service），通过耗尽目标系统资源使其无法提供正常服务</p>
+    <table>
+        <tr><th>攻击类型</th><th>样本数</th><th>占DoS类比例</th><th>占总样本比例</th><th>描述</th></tr>
+
+
+        <tr>
+            <td><strong>neptune</strong></td>
+            <td>41,214</td>
+            <td>89.74%</td>
+            <td>32.72%</td>
+            <td style="font-size: 12px; color: #666;">SYN洪水攻击，发送大量SYN包耗尽系统资源</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>smurf</strong></td>
+            <td>2,646</td>
+            <td>5.76%</td>
+            <td>2.10%</td>
+            <td style="font-size: 12px; color: #666;">Smurf攻击，利用ICMP广播包进行分布式拒绝服务</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>back</strong></td>
+            <td>956</td>
+            <td>2.08%</td>
+            <td>0.76%</td>
+            <td style="font-size: 12px; color: #666;">Land攻击的变体，发送大量带有伪造源地址的SYN包</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>teardrop</strong></td>
+            <td>892</td>
+            <td>1.94%</td>
+            <td>0.71%</td>
+            <td style="font-size: 12px; color: #666;">泪滴攻击，发送重叠偏移的IP分片导致系统崩溃</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>pod</strong></td>
+            <td>201</td>
+            <td>0.44%</td>
+            <td>0.16%</td>
+            <td style="font-size: 12px; color: #666;">死亡之Ping，发送超大ICMP数据包导致系统崩溃</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>land</strong></td>
+            <td>18</td>
+            <td>0.04%</td>
+            <td>0.01%</td>
+            <td style="font-size: 12px; color: #666;">Land攻击，发送源地址与目标地址相同的SYN包</td>
+        </tr>
+
+</table></div>
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-probe">Probe</span>
+        <h3 style="margin:0;">Probe 攻击类 (11,656 样本, 9.25%)</h3>
+    </div>
+    <p class="desc-text">探测/扫描攻击，攻击者通过扫描网络来收集信息和发现漏洞</p>
+    <table>
+        <tr><th>攻击类型</th><th>样本数</th><th>占Probe类比例</th><th>占总样本比例</th><th>描述</th></tr>
+
+
+        <tr>
+            <td><strong>satan</strong></td>
+            <td>3,633</td>
+            <td>31.17%</td>
+            <td>2.88%</td>
+            <td style="font-size: 12px; color: #666;">SATAN扫描，使用SATAN工具检测网络安全漏洞</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>ipsweep</strong></td>
+            <td>3,599</td>
+            <td>30.88%</td>
+            <td>2.86%</td>
+            <td style="font-size: 12px; color: #666;">IP地址扫描，探测网络中存活的主机</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>portsweep</strong></td>
+            <td>2,931</td>
+            <td>25.15%</td>
+            <td>2.33%</td>
+            <td style="font-size: 12px; color: #666;">端口扫描，探测目标主机的开放端口</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>nmap</strong></td>
+            <td>1,493</td>
+            <td>12.81%</td>
+            <td>1.19%</td>
+            <td style="font-size: 12px; color: #666;">Nmap端口扫描，使用Nmap工具探测开放端口</td>
+        </tr>
+
+</table></div>
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-r2l">R2L</span>
+        <h3 style="margin:0;">R2L 攻击类 (995 样本, 0.79%)</h3>
+    </div>
+    <p class="desc-text">远程到本地攻击（Remote to Local），攻击者从远程机器获取本地用户权限</p>
+    <table>
+        <tr><th>攻击类型</th><th>样本数</th><th>占R2L类比例</th><th>占总样本比例</th><th>描述</th></tr>
+
+
+        <tr>
+            <td><strong>warezclient</strong></td>
+            <td>890</td>
+            <td>89.45%</td>
+            <td>0.71%</td>
+            <td style="font-size: 12px; color: #666;">Warez客户端，客户端从warez服务器下载非法软件</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>guess_passwd</strong></td>
+            <td>53</td>
+            <td>5.33%</td>
+            <td>0.04%</td>
+            <td style="font-size: 12px; color: #666;">密码猜测攻击，通过暴力破解获取用户密码</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>warezmaster</strong></td>
+            <td>20</td>
+            <td>2.01%</td>
+            <td>0.02%</td>
+            <td style="font-size: 12px; color: #666;">Warez服务器，服务器提供非法软件下载</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>imap</strong></td>
+            <td>11</td>
+            <td>1.11%</td>
+            <td>0.01%</td>
+            <td style="font-size: 12px; color: #666;">IMAP攻击，利用IMAP协议漏洞进行未授权访问</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>ftp_write</strong></td>
+            <td>8</td>
+            <td>0.80%</td>
+            <td>0.01%</td>
+            <td style="font-size: 12px; color: #666;">FTP写攻击，攻击者尝试写入匿名FTP目录</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>multihop</strong></td>
+            <td>7</td>
+            <td>0.70%</td>
+            <td>0.01%</td>
+            <td style="font-size: 12px; color: #666;">多跳攻击，通过多个中继主机进行攻击以隐藏身份</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>phf</strong></td>
+            <td>4</td>
+            <td>0.40%</td>
+            <td>0.00%</td>
+            <td style="font-size: 12px; color: #666;">PHF攻击，利用Web服务器phf脚本漏洞进行命令注入</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>spy</strong></td>
+            <td>2</td>
+            <td>0.20%</td>
+            <td>0.00%</td>
+            <td style="font-size: 12px; color: #666;">间谍攻击，攻击者试图窃取敏感信息</td>
+        </tr>
+
+</table></div>
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-u2r">U2R</span>
+        <h3 style="margin:0;">U2R 攻击类 (52 样本, 0.04%)</h3>
+    </div>
+    <p class="desc-text">用户到根攻击（User to Root），攻击者从普通用户权限提升到超级用户权限</p>
+    <table>
+        <tr><th>攻击类型</th><th>样本数</th><th>占U2R类比例</th><th>占总样本比例</th><th>描述</th></tr>
+
+
+        <tr>
+            <td><strong>buffer_overflow</strong></td>
+            <td>30</td>
+            <td>57.69%</td>
+            <td>0.02%</td>
+            <td style="font-size: 12px; color: #666;">缓冲区溢出攻击，通过发送超出缓冲区的数据获取root权限</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>rootkit</strong></td>
+            <td>10</td>
+            <td>19.23%</td>
+            <td>0.01%</td>
+            <td style="font-size: 12px; color: #666;">Rootkit攻击，安装rootkit以隐藏攻击痕迹并获取持久访问</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>loadmodule</strong></td>
+            <td>9</td>
+            <td>17.31%</td>
+            <td>0.01%</td>
+            <td style="font-size: 12px; color: #666;">加载模块攻击，通过加载恶意内核模块获取root权限</td>
+        </tr>
+
+
+        <tr>
+            <td><strong>perl</strong></td>
+            <td>3</td>
+            <td>5.77%</td>
+            <td>0.00%</td>
+            <td style="font-size: 12px; color: #666;">Perl攻击，利用Perl脚本进行的U2R攻击</td>
+        </tr>
+
+</table></div>
+
+<h2 id="protocol-distribution">五、分类特征分布</h2>
+
+<h3>5.1 协议类型分布 (protocol_type)</h3>
+<table>
+<tr><th>协议类型</th><th>样本数</th><th>占比</th><th>正常样本</th><th>攻击样本</th><th>攻击率</th></tr>
+
+<tr>
+    <td><strong>tcp</strong></td>
+    <td>102,689</td>
+    <td>81.52%</td>
+    <td>53,600</td>
+    <td>49,089</td>
+    <td style="color: #27ae60;">47.80%</td>
+</tr>
+
+
+<tr>
+    <td><strong>udp</strong></td>
+    <td>14,993</td>
+    <td>11.90%</td>
+    <td>12,434</td>
+    <td>2,559</td>
+    <td style="color: #27ae60;">17.07%</td>
+</tr>
+
+
+<tr>
+    <td><strong>icmp</strong></td>
+    <td>8,291</td>
+    <td>6.58%</td>
+    <td>1,309</td>
+    <td>6,982</td>
+    <td style="color: #e74c3c;">84.21%</td>
+</tr>
+
+</table>
+<h3>5.2 连接标志分布 (flag)</h3>
+<table>
+<tr><th>标志类型</th><th>样本数</th><th>占比</th><th>正常样本</th><th>攻击样本</th><th>攻击率</th></tr>
+
+<tr>
+    <td><strong>SF</strong></td>
+    <td>74,945</td>
+    <td>59.49%</td>
+    <td>63,393</td>
+    <td>11,552</td>
+    <td style="color: #27ae60;">15.41%</td>
+</tr>
+
+
+<tr>
+    <td><strong>S0</strong></td>
+    <td>34,851</td>
+    <td>27.67%</td>
+    <td>354</td>
+    <td>34,497</td>
+    <td style="color: #e74c3c;">98.98%</td>
+</tr>
+
+
+<tr>
+    <td><strong>REJ</strong></td>
+    <td>11,233</td>
+    <td>8.92%</td>
+    <td>2,693</td>
+    <td>8,540</td>
+    <td style="color: #e74c3c;">76.03%</td>
+</tr>
+
+
+<tr>
+    <td><strong>RSTR</strong></td>
+    <td>2,421</td>
+    <td>1.92%</td>
+    <td>146</td>
+    <td>2,275</td>
+    <td style="color: #e74c3c;">93.97%</td>
+</tr>
+
+
+<tr>
+    <td><strong>RSTO</strong></td>
+    <td>1,562</td>
+    <td>1.24%</td>
+    <td>219</td>
+    <td>1,343</td>
+    <td style="color: #e74c3c;">85.98%</td>
+</tr>
+
+
+<tr>
+    <td><strong>S1</strong></td>
+    <td>365</td>
+    <td>0.29%</td>
+    <td>361</td>
+    <td>4</td>
+    <td style="color: #27ae60;">1.10%</td>
+</tr>
+
+
+<tr>
+    <td><strong>SH</strong></td>
+    <td>271</td>
+    <td>0.22%</td>
+    <td>2</td>
+    <td>269</td>
+    <td style="color: #e74c3c;">99.26%</td>
+</tr>
+
+
+<tr>
+    <td><strong>S2</strong></td>
+    <td>127</td>
+    <td>0.10%</td>
+    <td>119</td>
+    <td>8</td>
+    <td style="color: #27ae60;">6.30%</td>
+</tr>
+
+
+<tr>
+    <td><strong>RSTOS0</strong></td>
+    <td>103</td>
+    <td>0.08%</td>
+    <td>0</td>
+    <td>103</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>S3</strong></td>
+    <td>49</td>
+    <td>0.04%</td>
+    <td>45</td>
+    <td>4</td>
+    <td style="color: #27ae60;">8.16%</td>
+</tr>
+
+
+<tr>
+    <td><strong>OTH</strong></td>
+    <td>46</td>
+    <td>0.04%</td>
+    <td>11</td>
+    <td>35</td>
+    <td style="color: #e74c3c;">76.09%</td>
+</tr>
+
+</table>
+<h3>5.3 服务类型分布 (service) - Top 20</h3>
+<table>
+<tr><th>服务类型</th><th>样本数</th><th>占比</th><th>正常样本</th><th>攻击样本</th><th>攻击率</th></tr>
+
+<tr>
+    <td><strong>http</strong></td>
+    <td>40,338</td>
+    <td>32.02%</td>
+    <td>38,049</td>
+    <td>2,289</td>
+    <td style="color: #27ae60;">5.67%</td>
+</tr>
+
+
+<tr>
+    <td><strong>private</strong></td>
+    <td>21,853</td>
+    <td>17.35%</td>
+    <td>982</td>
+    <td>20,871</td>
+    <td style="color: #e74c3c;">95.51%</td>
+</tr>
+
+
+<tr>
+    <td><strong>domain_u</strong></td>
+    <td>9,043</td>
+    <td>7.18%</td>
+    <td>9,034</td>
+    <td>9</td>
+    <td style="color: #27ae60;">0.10%</td>
+</tr>
+
+
+<tr>
+    <td><strong>smtp</strong></td>
+    <td>7,313</td>
+    <td>5.81%</td>
+    <td>7,029</td>
+    <td>284</td>
+    <td style="color: #27ae60;">3.88%</td>
+</tr>
+
+
+<tr>
+    <td><strong>ftp_data</strong></td>
+    <td>6,860</td>
+    <td>5.45%</td>
+    <td>4,984</td>
+    <td>1,876</td>
+    <td style="color: #27ae60;">27.35%</td>
+</tr>
+
+
+<tr>
+    <td><strong>eco_i</strong></td>
+    <td>4,586</td>
+    <td>3.64%</td>
+    <td>497</td>
+    <td>4,089</td>
+    <td style="color: #e74c3c;">89.16%</td>
+</tr>
+
+
+<tr>
+    <td><strong>other</strong></td>
+    <td>4,359</td>
+    <td>3.46%</td>
+    <td>2,604</td>
+    <td>1,755</td>
+    <td style="color: #27ae60;">40.26%</td>
+</tr>
+
+
+<tr>
+    <td><strong>ecr_i</strong></td>
+    <td>3,077</td>
+    <td>2.44%</td>
+    <td>190</td>
+    <td>2,887</td>
+    <td style="color: #e74c3c;">93.83%</td>
+</tr>
+
+
+<tr>
+    <td><strong>telnet</strong></td>
+    <td>2,353</td>
+    <td>1.87%</td>
+    <td>917</td>
+    <td>1,436</td>
+    <td style="color: #e74c3c;">61.03%</td>
+</tr>
+
+
+<tr>
+    <td><strong>finger</strong></td>
+    <td>1,767</td>
+    <td>1.40%</td>
+    <td>545</td>
+    <td>1,222</td>
+    <td style="color: #e74c3c;">69.16%</td>
+</tr>
+
+
+<tr>
+    <td><strong>ftp</strong></td>
+    <td>1,754</td>
+    <td>1.39%</td>
+    <td>918</td>
+    <td>836</td>
+    <td style="color: #27ae60;">47.66%</td>
+</tr>
+
+
+<tr>
+    <td><strong>auth</strong></td>
+    <td>955</td>
+    <td>0.76%</td>
+    <td>236</td>
+    <td>719</td>
+    <td style="color: #e74c3c;">75.29%</td>
+</tr>
+
+
+<tr>
+    <td><strong>Z39_50</strong></td>
+    <td>862</td>
+    <td>0.68%</td>
+    <td>0</td>
+    <td>862</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>uucp</strong></td>
+    <td>780</td>
+    <td>0.62%</td>
+    <td>0</td>
+    <td>780</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>courier</strong></td>
+    <td>734</td>
+    <td>0.58%</td>
+    <td>0</td>
+    <td>734</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>bgp</strong></td>
+    <td>710</td>
+    <td>0.56%</td>
+    <td>0</td>
+    <td>710</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>whois</strong></td>
+    <td>693</td>
+    <td>0.55%</td>
+    <td>0</td>
+    <td>693</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>uucp_path</strong></td>
+    <td>689</td>
+    <td>0.55%</td>
+    <td>0</td>
+    <td>689</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>iso_tsap</strong></td>
+    <td>687</td>
+    <td>0.55%</td>
+    <td>0</td>
+    <td>687</td>
+    <td style="color: #e74c3c;">100.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>time</strong></td>
+    <td>654</td>
+    <td>0.52%</td>
+    <td>76</td>
+    <td>578</td>
+    <td style="color: #e74c3c;">88.38%</td>
+</tr>
+
+</table>
+
+<p style="color: #888; font-size: 12px;">注：共 70 种服务类型，此处仅展示前20种</p>
+
+
+<h2 id="numeric-features">六、数值特征统计</h2>
+
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">26</div>
+        <div class="stat-label">连续型特征</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">5</div>
+        <div class="stat-label">二值型特征</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">6</div>
+        <div class="stat-label">离散计数特征</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">1</div>
+        <div class="stat-label">常量特征</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">3</div>
+        <div class="stat-label">分类型特征</div>
+    </div>
+</div>
+
+<h3>6.1 二值特征统计</h3>
+<table>
+<tr><th>特征名</th><th>为1的比例</th><th>为0的比例</th><th>正常样本中1的比例</th><th>攻击样本中1的比例</th></tr>
+
+<tr>
+    <td><strong>land</strong></td>
+    <td>0.0002 (0.02%)</td>
+    <td>0.9998 (99.98%)</td>
+    <td>0.0001 (0.01%)</td>
+    <td style="color: #333;">0.0003 (0.03%)</td>
+</tr>
+
+
+<tr>
+    <td><strong>logged_in</strong></td>
+    <td>0.3957 (39.57%)</td>
+    <td>0.6043 (60.43%)</td>
+    <td>0.7106 (71.06%)</td>
+    <td style="color: #e74c3c;">0.0340 (3.40%)</td>
+</tr>
+
+
+<tr>
+    <td><strong>root_shell</strong></td>
+    <td>0.0013 (0.13%)</td>
+    <td>0.9987 (99.87%)</td>
+    <td>0.0020 (0.20%)</td>
+    <td style="color: #333;">0.0005 (0.05%)</td>
+</tr>
+
+
+<tr>
+    <td><strong>is_host_login</strong></td>
+    <td>0.0000 (0.00%)</td>
+    <td>1.0000 (100.00%)</td>
+    <td>0.0000 (0.00%)</td>
+    <td style="color: #333;">0.0000 (0.00%)</td>
+</tr>
+
+
+<tr>
+    <td><strong>is_guest_login</strong></td>
+    <td>0.0094 (0.94%)</td>
+    <td>0.9906 (99.06%)</td>
+    <td>0.0130 (1.30%)</td>
+    <td style="color: #333;">0.0054 (0.54%)</td>
+</tr>
+
+</table>
+<h3>6.2 连续型/离散型特征统计</h3>
+<table>
+<tr><th>特征名</th><th>类型</th><th>均值</th><th>标准差</th><th>最小值</th><th>最大值</th><th>中位数</th><th>偏度</th><th>零值比例</th></tr>
+
+<tr>
+    <td><strong>count</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>84.1076</td>
+    <td>114.5086</td>
+    <td>0.00</td>
+    <td>511.00</td>
+    <td>14.0000</td>
+    <td style="color: #333;">1.51</td>
+    <td>0.01%</td>
+</tr>
+
+
+<tr>
+    <td><strong>diff_srv_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.0631</td>
+    <td>0.1803</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">4.38</td>
+    <td>60.50%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_bytes</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>19779.1144</td>
+    <td>4021269.1514</td>
+    <td>0.00</td>
+    <td>1309937401.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">290.05</td>
+    <td>53.95%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_count</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>182.1489</td>
+    <td>99.2062</td>
+    <td>0.00</td>
+    <td>255.00</td>
+    <td>255.0000</td>
+    <td style="color: #333;">-0.83</td>
+    <td>0.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_diff_srv_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.0830</td>
+    <td>0.1889</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0200</td>
+    <td style="color: #e74c3c;">3.61</td>
+    <td>37.30%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_rerror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.1188</td>
+    <td>0.3066</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">2.35</td>
+    <td>81.90%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_same_src_port_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.1484</td>
+    <td>0.3090</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">2.09</td>
+    <td>50.03%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_same_srv_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.5212</td>
+    <td>0.4489</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.5100</td>
+    <td style="color: #333;">-0.01</td>
+    <td>5.50%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_serror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.2845</td>
+    <td>0.4448</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">0.97</td>
+    <td>64.61%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_srv_count</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>115.6530</td>
+    <td>110.7027</td>
+    <td>0.00</td>
+    <td>255.00</td>
+    <td>63.0000</td>
+    <td style="color: #333;">0.28</td>
+    <td>0.00%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_srv_diff_host_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.0325</td>
+    <td>0.1126</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">5.55</td>
+    <td>68.99%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_srv_rerror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.1202</td>
+    <td>0.3195</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">2.34</td>
+    <td>84.63%</td>
+</tr>
+
+
+<tr>
+    <td><strong>dst_host_srv_serror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.2785</td>
+    <td>0.4457</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">0.99</td>
+    <td>67.76%</td>
+</tr>
+
+
+<tr>
+    <td><strong>duration</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>287.1447</td>
+    <td>2604.5153</td>
+    <td>0.00</td>
+    <td>42908.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">11.88</td>
+    <td>92.05%</td>
+</tr>
+
+
+<tr>
+    <td><strong>hot</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.2044</td>
+    <td>2.1500</td>
+    <td>0.00</td>
+    <td>77.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">12.59</td>
+    <td>97.88%</td>
+</tr>
+
+
+<tr>
+    <td><strong>num_access_files</strong> <span class="feature-type-badge type-discrete">离散型</span></td>
+    <td>离散型</td>
+    <td>0.0041</td>
+    <td>0.0994</td>
+    <td>0.00</td>
+    <td>9.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">45.55</td>
+    <td>99.71%</td>
+</tr>
+
+
+<tr>
+    <td><strong>num_compromised</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.2793</td>
+    <td>23.9420</td>
+    <td>0.00</td>
+    <td>7479.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">250.11</td>
+    <td>98.98%</td>
+</tr>
+
+
+<tr>
+    <td><strong>num_failed_logins</strong> <span class="feature-type-badge type-discrete">离散型</span></td>
+    <td>离散型</td>
+    <td>0.0012</td>
+    <td>0.0452</td>
+    <td>0.00</td>
+    <td>5.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">53.76</td>
+    <td>99.90%</td>
+</tr>
+
+
+<tr>
+    <td><strong>num_file_creations</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.0127</td>
+    <td>0.4839</td>
+    <td>0.00</td>
+    <td>43.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">55.67</td>
+    <td>99.77%</td>
+</tr>
+
+
+<tr>
+    <td><strong>num_root</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.3022</td>
+    <td>24.3996</td>
+    <td>0.00</td>
+    <td>7468.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">236.91</td>
+    <td>99.48%</td>
+</tr>
+
+
+<tr>
+    <td><strong>num_shells</strong> <span class="feature-type-badge type-discrete">离散型</span></td>
+    <td>离散型</td>
+    <td>0.0004</td>
+    <td>0.0222</td>
+    <td>0.00</td>
+    <td>2.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">59.59</td>
+    <td>99.96%</td>
+</tr>
+
+
+<tr>
+    <td><strong>rerror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.1200</td>
+    <td>0.3204</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">2.33</td>
+    <td>87.15%</td>
+</tr>
+
+
+<tr>
+    <td><strong>same_srv_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.6609</td>
+    <td>0.4396</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>1.0000</td>
+    <td style="color: #333;">-0.57</td>
+    <td>2.20%</td>
+</tr>
+
+
+<tr>
+    <td><strong>serror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.2845</td>
+    <td>0.4465</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">0.96</td>
+    <td>68.93%</td>
+</tr>
+
+
+<tr>
+    <td><strong>src_bytes</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>45566.7430</td>
+    <td>5870331.1819</td>
+    <td>0.00</td>
+    <td>1379963888.00</td>
+    <td>44.0000</td>
+    <td style="color: #e74c3c;">190.67</td>
+    <td>39.21%</td>
+</tr>
+
+
+<tr>
+    <td><strong>srv_count</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>27.7379</td>
+    <td>72.6358</td>
+    <td>0.00</td>
+    <td>511.00</td>
+    <td>8.0000</td>
+    <td style="color: #e74c3c;">4.69</td>
+    <td>0.01%</td>
+</tr>
+
+
+<tr>
+    <td><strong>srv_diff_host_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.0973</td>
+    <td>0.2598</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">2.86</td>
+    <td>77.46%</td>
+</tr>
+
+
+<tr>
+    <td><strong>srv_rerror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.1212</td>
+    <td>0.3236</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">2.33</td>
+    <td>87.14%</td>
+</tr>
+
+
+<tr>
+    <td><strong>srv_serror_rate</strong> <span class="feature-type-badge type-continuous">连续型</span></td>
+    <td>连续型</td>
+    <td>0.2825</td>
+    <td>0.4470</td>
+    <td>0.00</td>
+    <td>1.00</td>
+    <td>0.0000</td>
+    <td style="color: #333;">0.97</td>
+    <td>70.45%</td>
+</tr>
+
+
+<tr>
+    <td><strong>su_attempted</strong> <span class="feature-type-badge type-discrete">离散型</span></td>
+    <td>离散型</td>
+    <td>0.0011</td>
+    <td>0.0452</td>
+    <td>0.00</td>
+    <td>2.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">42.44</td>
+    <td>99.94%</td>
+</tr>
+
+
+<tr>
+    <td><strong>urgent</strong> <span class="feature-type-badge type-discrete">离散型</span></td>
+    <td>离散型</td>
+    <td>0.0001</td>
+    <td>0.0144</td>
+    <td>0.00</td>
+    <td>3.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">149.91</td>
+    <td>99.99%</td>
+</tr>
+
+
+<tr>
+    <td><strong>wrong_fragment</strong> <span class="feature-type-badge type-discrete">离散型</span></td>
+    <td>离散型</td>
+    <td>0.0227</td>
+    <td>0.2535</td>
+    <td>0.00</td>
+    <td>3.00</td>
+    <td>0.0000</td>
+    <td style="color: #e74c3c;">11.46</td>
+    <td>99.13%</td>
+</tr>
+
+</table>
+<h3>6.3 常量特征</h3>
+<div class="warning-box">
+<strong>注意：</strong>以下特征为常量（只有一个值），对模型训练没有贡献，可以考虑删除：
+<ul style="margin-left: 20px; margin-top: 8px;">
+<li><strong>num_outbound_cmds</strong> = 0</li>
+</ul></div>
+
+<h2 id="per-attack-features">七、各类攻击的特征画像</h2>
+
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-normal">Normal</span>
+        <h3 style="margin:0;">Normal 类特征画像</h3>
+    </div>
+    <table>
+        <tr><th>特征</th>
+
+<th>normal</th>
+</tr>
+<tr><td><strong>duration</strong></td>
+<td>168.59 &plusmn; 1304.45</td>
+</tr>
+<tr><td><strong>src_bytes</strong></td>
+<td>13133.28 &plusmn; 418113.13</td>
+</tr>
+<tr><td><strong>dst_bytes</strong></td>
+<td>4329.69 &plusmn; 65462.82</td>
+</tr>
+<tr><td><strong>count</strong></td>
+<td>22.52 &plusmn; 54.03</td>
+</tr>
+<tr><td><strong>srv_count</strong></td>
+<td>27.69 &plusmn; 60.18</td>
+</tr>
+<tr><td><strong>serror_rate</strong></td>
+<td>0.01 &plusmn; 0.09</td>
+</tr>
+<tr><td><strong>same_srv_rate</strong></td>
+<td>0.97 &plusmn; 0.14</td>
+</tr>
+<tr><td><strong>dst_host_serror_rate</strong></td>
+<td>0.01 &plusmn; 0.09</td>
+</tr>
+</table>
+</div>
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-dos">DoS</span>
+        <h3 style="margin:0;">DoS 类特征画像</h3>
+    </div>
+    <table>
+        <tr><th>特征</th>
+
+<th>back</th>
+<th>land</th>
+<th>neptune</th>
+<th>pod</th>
+<th>smurf</th>
+<th>teardrop</th>
+</tr>
+<tr><td><strong>duration</strong></td>
+<td>0.30 &plusmn; 1.67</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.01</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>src_bytes</strong></td>
+<td>53655.93 &plusmn; 4751.02</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.26 &plusmn; 52.78</td>
+<td>1466.33 &plusmn; 111.35</td>
+<td>906.81 &plusmn; 220.10</td>
+<td>28.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>dst_bytes</strong></td>
+<td>8127.60 &plusmn; 924.66</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.02 &plusmn; 4.33</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.06 &plusmn; 1.33</td>
+</tr>
+<tr><td><strong>count</strong></td>
+<td>3.51 &plusmn; 1.75</td>
+<td>5.39 &plusmn; 18.13</td>
+<td>172.84 &plusmn; 81.04</td>
+<td>4.97 &plusmn; 5.71</td>
+<td>376.69 &plusmn; 168.78</td>
+<td>61.09 &plusmn; 41.79</td>
+</tr>
+<tr><td><strong>srv_count</strong></td>
+<td>3.82 &plusmn; 2.03</td>
+<td>1.78 &plusmn; 0.43</td>
+<td>11.00 &plusmn; 6.58</td>
+<td>5.98 &plusmn; 5.15</td>
+<td>376.68 &plusmn; 168.77</td>
+<td>50.38 &plusmn; 28.39</td>
+</tr>
+<tr><td><strong>serror_rate</strong></td>
+<td>0.01 &plusmn; 0.05</td>
+<td>0.96 &plusmn; 0.16</td>
+<td>0.83 &plusmn; 0.37</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.07 &plusmn; 0.22</td>
+</tr>
+<tr><td><strong>same_srv_rate</strong></td>
+<td>1.00 &plusmn; 0.02</td>
+<td>0.91 &plusmn; 0.27</td>
+<td>0.10 &plusmn; 0.14</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>0.92 &plusmn; 0.22</td>
+</tr>
+<tr><td><strong>dst_host_serror_rate</strong></td>
+<td>0.00 &plusmn; 0.01</td>
+<td>0.88 &plusmn; 0.30</td>
+<td>0.83 &plusmn; 0.37</td>
+<td>0.09 &plusmn; 0.19</td>
+<td>0.01 &plusmn; 0.05</td>
+<td>0.02 &plusmn; 0.03</td>
+</tr>
+</table>
+</div>
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-probe">Probe</span>
+        <h3 style="margin:0;">Probe 类特征画像</h3>
+    </div>
+    <table>
+        <tr><th>特征</th>
+
+<th>satan</th>
+<th>ipsweep</th>
+<th>nmap</th>
+<th>portsweep</th>
+</tr>
+<tr><td><strong>duration</strong></td>
+<td>0.13 &plusmn; 0.89</td>
+<td>3.62 &plusmn; 212.41</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>8246.70 &plusmn; 13620.48</td>
+</tr>
+<tr><td><strong>src_bytes</strong></td>
+<td>4.26 &plusmn; 75.05</td>
+<td>9.61 &plusmn; 68.59</td>
+<td>37.19 &plusmn; 71.44</td>
+<td>1533735.46 &plusmn; 38402896.98</td>
+</tr>
+<tr><td><strong>dst_bytes</strong></td>
+<td>9.30 &plusmn; 303.40</td>
+<td>15.15 &plusmn; 860.70</td>
+<td>0.21 &plusmn; 5.95</td>
+<td>720068.42 &plusmn; 26353349.39</td>
+</tr>
+<tr><td><strong>count</strong></td>
+<td>218.77 &plusmn; 204.78</td>
+<td>1.03 &plusmn; 1.65</td>
+<td>1.48 &plusmn; 13.25</td>
+<td>33.23 &plusmn; 92.10</td>
+</tr>
+<tr><td><strong>srv_count</strong></td>
+<td>7.80 &plusmn; 22.32</td>
+<td>19.16 &plusmn; 17.17</td>
+<td>17.37 &plusmn; 16.77</td>
+<td>1.45 &plusmn; 0.53</td>
+</tr>
+<tr><td><strong>serror_rate</strong></td>
+<td>0.05 &plusmn; 0.06</td>
+<td>0.00 &plusmn; 0.02</td>
+<td>0.18 &plusmn; 0.38</td>
+<td>0.03 &plusmn; 0.15</td>
+</tr>
+<tr><td><strong>same_srv_rate</strong></td>
+<td>0.20 &plusmn; 0.33</td>
+<td>1.00 &plusmn; 0.03</td>
+<td>0.99 &plusmn; 0.07</td>
+<td>0.79 &plusmn; 0.37</td>
+</tr>
+<tr><td><strong>dst_host_serror_rate</strong></td>
+<td>0.06 &plusmn; 0.07</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.16 &plusmn; 0.35</td>
+<td>0.02 &plusmn; 0.08</td>
+</tr>
+</table>
+</div>
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-r2l">R2L</span>
+        <h3 style="margin:0;">R2L 类特征画像</h3>
+    </div>
+    <table>
+        <tr><th>特征</th>
+
+<th>guess_passwd</th>
+<th>warezmaster</th>
+<th>warezclient</th>
+<th>imap</th>
+<th>ftp_write</th>
+<th>multihop</th>
+<th>phf</th>
+<th>spy</th>
+</tr>
+<tr><td><strong>duration</strong></td>
+<td>2.72 &plusmn; 11.88</td>
+<td>15.05 &plusmn; 33.39</td>
+<td>705.09 &plusmn; 2350.16</td>
+<td>6.55 &plusmn; 14.73</td>
+<td>32.38 &plusmn; 47.45</td>
+<td>184.00 &plusmn; 253.85</td>
+<td>4.50 &plusmn; 5.74</td>
+<td>318.00 &plusmn; 26.87</td>
+</tr>
+<tr><td><strong>src_bytes</strong></td>
+<td>125.34 &plusmn; 3.04</td>
+<td>49.30 &plusmn; 212.16</td>
+<td>344012.92 &plusmn; 1279843.78</td>
+<td>379.18 &plusmn; 650.62</td>
+<td>220.75 &plusmn; 267.75</td>
+<td>435.14 &plusmn; 540.96</td>
+<td>51.00 &plusmn; 0.00</td>
+<td>174.50 &plusmn; 88.39</td>
+</tr>
+<tr><td><strong>dst_bytes</strong></td>
+<td>216.19 &plusmn; 257.50</td>
+<td>3922087.70 &plusmn; 2197498.96</td>
+<td>821.63 &plusmn; 1144.18</td>
+<td>59944.00 &plusmn; 195452.58</td>
+<td>5382.25 &plusmn; 13793.74</td>
+<td>213016.29 &plusmn; 382586.00</td>
+<td>8127.00 &plusmn; 0.00</td>
+<td>1193.50 &plusmn; 490.02</td>
+</tr>
+<tr><td><strong>count</strong></td>
+<td>1.53 &plusmn; 0.54</td>
+<td>1.15 &plusmn; 0.49</td>
+<td>1.28 &plusmn; 0.45</td>
+<td>2.09 &plusmn; 1.22</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>srv_count</strong></td>
+<td>1.53 &plusmn; 0.54</td>
+<td>1.15 &plusmn; 0.49</td>
+<td>1.32 &plusmn; 0.78</td>
+<td>103.91 &plusmn; 68.25</td>
+<td>1.12 &plusmn; 0.35</td>
+<td>1.14 &plusmn; 0.38</td>
+<td>1.25 &plusmn; 0.50</td>
+<td>1.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>serror_rate</strong></td>
+<td>0.04 &plusmn; 0.17</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.05</td>
+<td>0.67 &plusmn; 0.39</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>same_srv_rate</strong></td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.04</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>dst_host_serror_rate</strong></td>
+<td>0.10 &plusmn; 0.15</td>
+<td>0.02 &plusmn; 0.09</td>
+<td>0.01 &plusmn; 0.05</td>
+<td>0.58 &plusmn; 0.27</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.22 &plusmn; 0.00</td>
+</tr>
+</table>
+</div>
+
+<div class="category-section">
+    <div class="category-header">
+        <span class="category-badge badge-u2r">U2R</span>
+        <h3 style="margin:0;">U2R 类特征画像</h3>
+    </div>
+    <table>
+        <tr><th>特征</th>
+
+<th>buffer_overflow</th>
+<th>loadmodule</th>
+<th>perl</th>
+<th>rootkit</th>
+</tr>
+<tr><td><strong>duration</strong></td>
+<td>91.70 &plusmn; 97.51</td>
+<td>36.22 &plusmn; 41.41</td>
+<td>41.33 &plusmn; 14.84</td>
+<td>100.80 &plusmn; 216.19</td>
+</tr>
+<tr><td><strong>src_bytes</strong></td>
+<td>1400.43 &plusmn; 1337.13</td>
+<td>151.89 &plusmn; 127.75</td>
+<td>265.67 &plusmn; 4.93</td>
+<td>294.70 &plusmn; 538.58</td>
+</tr>
+<tr><td><strong>dst_bytes</strong></td>
+<td>6339.83 &plusmn; 12440.66</td>
+<td>3009.89 &plusmn; 2907.43</td>
+<td>2444.00 &plusmn; 166.14</td>
+<td>4276.60 &plusmn; 7558.54</td>
+</tr>
+<tr><td><strong>count</strong></td>
+<td>9.10 &plusmn; 30.67</td>
+<td>1.67 &plusmn; 1.12</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.10 &plusmn; 0.32</td>
+</tr>
+<tr><td><strong>srv_count</strong></td>
+<td>1.33 &plusmn; 0.71</td>
+<td>1.33 &plusmn; 0.71</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.10 &plusmn; 0.32</td>
+</tr>
+<tr><td><strong>serror_rate</strong></td>
+<td>0.07 &plusmn; 0.25</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>same_srv_rate</strong></td>
+<td>0.92 &plusmn; 0.26</td>
+<td>0.88 &plusmn; 0.19</td>
+<td>1.00 &plusmn; 0.00</td>
+<td>1.00 &plusmn; 0.00</td>
+</tr>
+<tr><td><strong>dst_host_serror_rate</strong></td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+<td>0.00 &plusmn; 0.00</td>
+</tr>
+</table>
+</div>
+
+<h2 id="difficulty">八、难度等级分布</h2>
+
+<table>
+<tr><th>难度等级</th><th>样本数</th><th>占比</th><th>正常样本</th><th>攻击样本</th></tr>
+
+<tr>
+    <td><strong>0</strong></td>
+    <td>66</td>
+    <td>0.05%</td>
+    <td>0</td>
+    <td>66</td>
+</tr>
+
+
+<tr>
+    <td><strong>1</strong></td>
+    <td>62</td>
+    <td>0.05%</td>
+    <td>3</td>
+    <td>59</td>
+</tr>
+
+
+<tr>
+    <td><strong>2</strong></td>
+    <td>54</td>
+    <td>0.04%</td>
+    <td>2</td>
+    <td>52</td>
+</tr>
+
+
+<tr>
+    <td><strong>3</strong></td>
+    <td>65</td>
+    <td>0.05%</td>
+    <td>4</td>
+    <td>61</td>
+</tr>
+
+
+<tr>
+    <td><strong>4</strong></td>
+    <td>79</td>
+    <td>0.06%</td>
+    <td>9</td>
+    <td>70</td>
+</tr>
+
+
+<tr>
+    <td><strong>5</strong></td>
+    <td>81</td>
+    <td>0.06%</td>
+    <td>15</td>
+    <td>66</td>
+</tr>
+
+
+<tr>
+    <td><strong>6</strong></td>
+    <td>96</td>
+    <td>0.08%</td>
+    <td>8</td>
+    <td>88</td>
+</tr>
+
+
+<tr>
+    <td><strong>7</strong></td>
+    <td>118</td>
+    <td>0.09%</td>
+    <td>22</td>
+    <td>96</td>
+</tr>
+
+
+<tr>
+    <td><strong>8</strong></td>
+    <td>106</td>
+    <td>0.08%</td>
+    <td>13</td>
+    <td>93</td>
+</tr>
+
+
+<tr>
+    <td><strong>9</strong></td>
+    <td>194</td>
+    <td>0.15%</td>
+    <td>45</td>
+    <td>149</td>
+</tr>
+
+
+<tr>
+    <td><strong>10</strong></td>
+    <td>253</td>
+    <td>0.20%</td>
+    <td>40</td>
+    <td>213</td>
+</tr>
+
+
+<tr>
+    <td><strong>11</strong></td>
+    <td>641</td>
+    <td>0.51%</td>
+    <td>59</td>
+    <td>582</td>
+</tr>
+
+
+<tr>
+    <td><strong>12</strong></td>
+    <td>729</td>
+    <td>0.58%</td>
+    <td>121</td>
+    <td>608</td>
+</tr>
+
+
+<tr>
+    <td><strong>13</strong></td>
+    <td>451</td>
+    <td>0.36%</td>
+    <td>111</td>
+    <td>340</td>
+</tr>
+
+
+<tr>
+    <td><strong>14</strong></td>
+    <td>674</td>
+    <td>0.54%</td>
+    <td>322</td>
+    <td>352</td>
+</tr>
+
+
+<tr>
+    <td><strong>15</strong></td>
+    <td>3,990</td>
+    <td>3.17%</td>
+    <td>230</td>
+    <td>3,760</td>
+</tr>
+
+
+<tr>
+    <td><strong>16</strong></td>
+    <td>2,393</td>
+    <td>1.90%</td>
+    <td>307</td>
+    <td>2,086</td>
+</tr>
+
+
+<tr>
+    <td><strong>17</strong></td>
+    <td>3,074</td>
+    <td>2.44%</td>
+    <td>1,133</td>
+    <td>1,941</td>
+</tr>
+
+
+<tr>
+    <td><strong>18</strong></td>
+    <td>20,667</td>
+    <td>16.41%</td>
+    <td>7,076</td>
+    <td>13,591</td>
+</tr>
+
+
+<tr>
+    <td><strong>19</strong></td>
+    <td>10,284</td>
+    <td>8.16%</td>
+    <td>1,773</td>
+    <td>8,511</td>
+</tr>
+
+
+<tr>
+    <td><strong>20</strong></td>
+    <td>19,339</td>
+    <td>15.35%</td>
+    <td>6,886</td>
+    <td>12,453</td>
+</tr>
+
+
+<tr>
+    <td><strong>21</strong></td>
+    <td>62,557</td>
+    <td>49.66%</td>
+    <td>49,164</td>
+    <td>13,393</td>
+</tr>
+
+</table>
+
+<div class="highlight-box">
+    <strong>难度等级说明：</strong>数据集中的difficulty字段表示每个连接记录的检测难度等级。
+    数值越高表示检测难度越大，通常对应更隐蔽、更复杂的攻击。
+    这个字段可以用于评估模型在不同难度样本上的表现。
+</div>
+
+
+<h2 id="insights">九、关键发现与建议</h2>
+
+
+<div class="success-box">
+    <h3 style="margin-top: 0; color: #27ae60;">数据特点总结</h3>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li><strong>严重类别不均衡：</strong>正常样本占 53.5%，DoS攻击占 36.5%，
+        而U2R攻击仅占 0.041%，两者相差 883 倍</li>
+        <li><strong>攻击类型多样性：</strong>共22种攻击类型，涵盖四大类（DoS、Probe、R2L、U2R）</li>
+        <li><strong>特征类型丰富：</strong>包含连续型、二值型、离散型和分类型多种特征</li>
+        <li><strong>特征偏度高：</strong>大部分数值特征呈高度偏态分布，可能需要对数变换或标准化</li>
+    </ul>
+</div>
+
+
+<div class="warning-box">
+    <h3 style="margin-top: 0; color: #e74c3c;">建模建议</h3>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li><strong>处理类别不均衡：</strong>建议使用SMOTE过采样、代价敏感学习或集成方法来处理稀有类别（U2R、R2L）</li>
+        <li><strong>特征工程：</strong>
+            <ul>
+                <li>对高度偏态的特征（如src_bytes, dst_bytes）考虑对数变换</li>
+                <li>删除常量特征（num_outbound_cmds、is_host_login）</li>
+                <li>对分类特征（protocol_type, service, flag）进行独热编码或标签编码</li>
+            </ul>
+        </li>
+        <li><strong>模型选择：</strong>
+            <ul>
+                <li>推荐尝试：随机森林、XGBoost、LightGBM等树模型（对类别不均衡和特征尺度不敏感）</li>
+                <li>神经网络：需要注意特征标准化和类别权重调整</li>
+            </ul>
+        </li>
+        <li><strong>评估指标：</strong>由于类别不均衡，不宜只使用准确率。建议使用F1-score、AUC-ROC、Precision-Recall曲线等指标</li>
+    </ul>
+</div>
+
+
+    </div>
+</body>
+</html>
