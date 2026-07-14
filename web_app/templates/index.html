@@ -74,6 +74,38 @@
             background-color: #e2e3e5;
             color: #383d41;
         }
+        .progress-track {
+            width: 100%;
+            height: 18px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 8px 0;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4e73df, #224abe);
+            border-radius: 10px;
+            transition: width 0.4s ease;
+        }
+        .progress-fill.is-test {
+            background: linear-gradient(90deg, #36b9cc, #25859a);
+        }
+        .progress-fill.is-prep {
+            background: linear-gradient(90deg, #f6c23e, #d39e00);
+        }
+        .progress-text {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            color: #212529;
+            font-weight: 600;
+        }
         .log-area {
             background: #f8f9fa;
             border-radius: 8px;
@@ -227,6 +259,10 @@
                                         </button>
                                     </div>
                                     <div class="col-md-8">
+                                        <div class="progress-track">
+                                            <div class="progress-fill is-prep" id="prep-progress-fill" style="width:0%"></div>
+                                            <div class="progress-text" id="prep-progress-text">0%</div>
+                                        </div>
                                         <div class="log-area" id="preprocess-log">
                                             <div class="text-muted">点击"开始预处理"按钮运行数据预处理流程...</div>
                                         </div>
@@ -343,6 +379,10 @@
                                         <button id="btn-xgboost" class="btn btn-primary w-100 mb-2" onclick="trainModel('xgboost')">
                                             <i class="fas fa-play"></i> 开始训练
                                         </button>
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-xgboost" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-xgboost">0%</div>
+                                        </div>
                                         <div class="log-area" id="log-xgboost">
                                             <div class="text-muted">等待训练...</div>
                                         </div>
@@ -367,6 +407,10 @@
                                         <button id="btn-dnn" class="btn btn-purple w-100 mb-2" onclick="trainModel('dnn')">
                                             <i class="fas fa-play"></i> 开始训练
                                         </button>
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-dnn" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-dnn">0%</div>
+                                        </div>
                                         <div class="log-area" id="log-dnn">
                                             <div class="text-muted">等待训练...</div>
                                         </div>
@@ -379,19 +423,23 @@
                                     <div class="card-header">
                                         <div class="row align-items-center">
                                             <div class="col-8">
-                                                <h5>Isolation Forest</h5>
+                                                <h5>1D-CNN</h5>
                                             </div>
                                             <div class="col-4">
-                                                <span id="status-isolation_forest" class="status-badge status-idle">待训练</span>
+                                                <span id="status-cnn1d" class="status-badge status-idle">待训练</span>
                                             </div>
                                         </div>
                                     </div>
                                     <div class="card-body">
-                                        <p class="text-sm text-muted mb-3">异常检测模型，无监督学习，对未知攻击类型有较好泛化能力</p>
-                                        <button id="btn-isolation_forest" class="btn btn-orange w-100 mb-2" onclick="trainModel('isolation_forest')">
+                                        <p class="text-sm text-muted mb-3">一维卷积神经网络，擅长捕获局部特征模式，适合序列化特征</p>
+                                        <button id="btn-cnn1d" class="btn btn-orange w-100 mb-2" onclick="trainModel('cnn1d')">
                                             <i class="fas fa-play"></i> 开始训练
                                         </button>
-                                        <div class="log-area" id="log-isolation_forest">
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-cnn1d" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-cnn1d">0%</div>
+                                        </div>
+                                        <div class="log-area" id="log-cnn1d">
                                             <div class="text-muted">等待训练...</div>
                                         </div>
                                     </div>
@@ -403,19 +451,23 @@
                                     <div class="card-header">
                                         <div class="row align-items-center">
                                             <div class="col-8">
-                                                <h5>AutoEncoder</h5>
+                                                <h5>Transformer</h5>
                                             </div>
                                             <div class="col-4">
-                                                <span id="status-autoencoder" class="status-badge status-idle">待训练</span>
+                                                <span id="status-transformer" class="status-badge status-idle">待训练</span>
                                             </div>
                                         </div>
                                     </div>
                                     <div class="card-body">
-                                        <p class="text-sm text-muted mb-3">深度学习异常检测，仅在正常流量上训练，重构误差大则为异常</p>
-                                        <button id="btn-autoencoder" class="btn btn-teal w-100 mb-2" onclick="trainModel('autoencoder')">
+                                        <p class="text-sm text-muted mb-3">基于自注意力机制的模型，能捕获特征间全局依赖关系</p>
+                                        <button id="btn-transformer" class="btn btn-teal w-100 mb-2" onclick="trainModel('transformer')">
                                             <i class="fas fa-play"></i> 开始训练
                                         </button>
-                                        <div class="log-area" id="log-autoencoder">
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-transformer" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-transformer">0%</div>
+                                        </div>
+                                        <div class="log-area" id="log-transformer">
                                             <div class="text-muted">等待训练...</div>
                                         </div>
                                     </div>
@@ -448,21 +500,21 @@
                                         </ul>
                                     </div>
                                     <div class="col-md-3">
-                                        <h6>Isolation Forest 参数</h6>
+                                        <h6>1D-CNN 参数</h6>
                                         <ul class="text-sm">
-                                            <li>n_estimators: 500</li>
-                                            <li>max_samples: 256</li>
-                                            <li>contamination: 0.05</li>
-                                            <li>无监督学习，仅用正常流量</li>
+                                            <li>卷积通道: 64 → 128 → 256</li>
+                                            <li>kernel_size: 3</li>
+                                            <li>Dropout: 0.3</li>
+                                            <li>全局平均池化 + 全连接分类</li>
                                         </ul>
                                     </div>
                                     <div class="col-md-3">
-                                        <h6>AutoEncoder 参数</h6>
+                                        <h6>Transformer 参数</h6>
                                         <ul class="text-sm">
-                                            <li>隐藏层: 256 → 128 → 64</li>
-                                            <li>Dropout: 0.2</li>
-                                            <li>学习率: 0.001</li>
-                                            <li>无监督学习，重构误差检测</li>
+                                            <li>d_model: 64, nhead: 4</li>
+                                            <li>层数: 2, FFN: 128</li>
+                                            <li>Dropout: 0.1</li>
+                                            <li>每特征作为 token，自注意力</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -502,7 +554,7 @@
                                     </div>
                                     <div class="col-md-6">
                                         <button class="btn btn-secondary w-100" disabled>
-                                            DNN / Isolation Forest / AutoEncoder（不支持）
+                                            DNN / 1D-CNN / Transformer（不支持）
                                         </button>
                                     </div>
                                 </div>
@@ -543,6 +595,10 @@
                                                 <button class="btn btn-primary w-100 mb-2" onclick="testModel('xgboost')">
                                                     <i class="fas fa-play"></i> 开始测试
                                                 </button>
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-xgboost" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-xgboost">0%</div>
+                                                </div>
                                                 <div class="log-area" id="test-log-xgboost" style="height:200px">
                                                     <div class="text-muted">等待测试...</div>
                                                 </div>
@@ -564,6 +620,10 @@
                                                 <button class="btn btn-purple w-100 mb-2" onclick="testModel('dnn')">
                                                     <i class="fas fa-play"></i> 开始测试
                                                 </button>
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-dnn" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-dnn">0%</div>
+                                                </div>
                                                 <div class="log-area" id="test-log-dnn" style="height:200px">
                                                     <div class="text-muted">等待测试...</div>
                                                 </div>
@@ -575,38 +635,46 @@
                                         <div class="card">
                                             <div class="card-header">
                                                 <div class="row align-items-center">
-                                                    <div class="col-8"><h6>Isolation Forest</h6></div>
+                                                    <div class="col-8"><h6>1D-CNN</h6></div>
                                                     <div class="col-4">
-                                                        <span id="test-status-isolation_forest" class="status-badge status-idle">待测试</span>
+                                                        <span id="test-status-cnn1d" class="status-badge status-idle">待测试</span>
                                                     </div>
                                                 </div>
                                             </div>
                                             <div class="card-body">
-                                                <button class="btn btn-orange w-100 mb-2" onclick="testModel('isolation_forest')">
+                                                <button class="btn btn-orange w-100 mb-2" onclick="testModel('cnn1d')">
                                                     <i class="fas fa-play"></i> 开始测试
                                                 </button>
-                                                <div class="log-area" id="test-log-isolation_forest" style="height:200px">
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-cnn1d" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-cnn1d">0%</div>
+                                                </div>
+                                                <div class="log-area" id="test-log-cnn1d" style="height:200px">
                                                     <div class="text-muted">等待测试...</div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <div class="col-md-4">
                                         <div class="card">
                                             <div class="card-header">
                                                 <div class="row align-items-center">
-                                                    <div class="col-8"><h6>AutoEncoder</h6></div>
+                                                    <div class="col-8"><h6>Transformer</h6></div>
                                                     <div class="col-4">
-                                                        <span id="test-status-autoencoder" class="status-badge status-idle">待测试</span>
+                                                        <span id="test-status-transformer" class="status-badge status-idle">待测试</span>
                                                     </div>
                                                 </div>
                                             </div>
                                             <div class="card-body">
-                                                <button class="btn btn-teal w-100 mb-2" onclick="testModel('autoencoder')">
+                                                <button class="btn btn-teal w-100 mb-2" onclick="testModel('transformer')">
                                                     <i class="fas fa-play"></i> 开始测试
                                                 </button>
-                                                <div class="log-area" id="test-log-autoencoder" style="height:200px">
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-transformer" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-transformer">0%</div>
+                                                </div>
+                                                <div class="log-area" id="test-log-transformer" style="height:200px">
                                                     <div class="text-muted">等待测试...</div>
                                                 </div>
                                             </div>
@@ -649,6 +717,15 @@
             document.getElementById(`tab-${tabId}`).classList.add('show', 'active');
         }
 
+        // 进度条通用更新：fillId 填充条, textId 文本百分比
+        function setProgress(fillId, textId, value) {
+            value = Math.max(0, Math.min(100, Math.round(value)));
+            const fill = document.getElementById(fillId);
+            const text = document.getElementById(textId);
+            if (fill) fill.style.width = value + '%';
+            if (text) text.textContent = value + '%';
+        }
+
         function startPreprocessing() {
             const dataset = document.getElementById('dataset-select').value;
             document.getElementById('btn-preprocess').disabled = true;
@@ -681,13 +758,15 @@
                         logArea.appendChild(div);
                     });
                     logArea.scrollTop = logArea.scrollHeight;
-                    
+                    setProgress('prep-progress-fill', 'prep-progress-text', data.progress || 0);
+
                     if (data.status === 'running') {
                         setTimeout(checkPreprocessStatus, 1000);
                     } else if (data.status === 'completed') {
                         document.getElementById('preprocess-status').className = 'status-badge status-completed';
                         document.getElementById('preprocess-status').textContent = '已完成';
                         document.getElementById('btn-reset-preprocess').disabled = false;
+                        setProgress('prep-progress-fill', 'prep-progress-text', 100);
                     } else if (data.status === 'error') {
                         document.getElementById('preprocess-status').className = 'status-badge status-error';
                         document.getElementById('preprocess-status').textContent = '出错';
@@ -705,6 +784,7 @@
                     document.getElementById('btn-preprocess').disabled = false;
                     document.getElementById('btn-reset-preprocess').disabled = true;
                     document.getElementById('preprocess-log').innerHTML = '<div class="text-muted">点击"开始预处理"按钮运行数据预处理流程...</div>';
+                    setProgress('prep-progress-fill', 'prep-progress-text', 0);
                 });
         }
 
@@ -918,7 +998,7 @@
                     const logArea = document.getElementById(`log-${modelName}`);
                     const status = document.getElementById(`status-${modelName}`);
                     const btn = document.getElementById(`btn-${modelName}`);
-                    
+
                     data.messages.forEach(msg => {
                         const div = document.createElement('div');
                         div.className = 'log-item';
@@ -926,7 +1006,8 @@
                         logArea.appendChild(div);
                     });
                     logArea.scrollTop = logArea.scrollHeight;
-                    
+                    setProgress(`prog-fill-${modelName}`, `prog-text-${modelName}`, data.progress || 0);
+
                     if (data.status === 'running') {
                         setTimeout(() => checkTrainStatus(modelName), 1000);
                     } else if (data.status === 'completed') {
@@ -934,6 +1015,7 @@
                         status.textContent = '已完成';
                         btn.textContent = '重新训练';
                         btn.disabled = false;
+                        setProgress(`prog-fill-${modelName}`, `prog-text-${modelName}`, 100);
                     } else if (data.status === 'error') {
                         status.className = 'status-badge status-error';
                         status.textContent = '出错';
@@ -1101,8 +1183,8 @@
             const map = {
                 'xgboost': 'XGBoost',
                 'dnn': 'DNN',
-                'isolation_forest': 'Isolation Forest',
-                'autoencoder': 'AutoEncoder'
+                'cnn1d': '1D-CNN',
+                'transformer': 'Transformer'
             };
             return map[name] || name;
         }
@@ -1176,7 +1258,7 @@
                 .then(data => {
                     const logArea = document.getElementById(`test-log-${modelName}`);
                     const status = document.getElementById(`test-status-${modelName}`);
-                    
+
                     data.messages.forEach(msg => {
                         const div = document.createElement('div');
                         div.className = 'log-item';
@@ -1184,12 +1266,14 @@
                         logArea.appendChild(div);
                     });
                     logArea.scrollTop = logArea.scrollHeight;
-                    
+                    setProgress(`tprog-fill-${modelName}`, `tprog-text-${modelName}`, data.progress || 0);
+
                     if (data.status === 'running') {
                         setTimeout(() => checkTestStatus(modelName), 1000);
                     } else if (data.status === 'completed') {
                         status.className = 'status-badge status-completed';
                         status.textContent = '已完成';
+                        setProgress(`tprog-fill-${modelName}`, `tprog-text-${modelName}`, 100);
                     } else if (data.status === 'error') {
                         status.className = 'status-badge status-error';
                         status.textContent = '出错';
@@ -1198,7 +1282,7 @@
         }
 
         function loadTestComparison() {
-            const models = ['xgboost', 'dnn', 'isolation_forest', 'autoencoder'];
+            const models = ['xgboost', 'dnn', 'cnn1d', 'transformer'];
             let results = {};
             let completed = 0;
             
