@@ -134,11 +134,18 @@ training_messages = {
     'test_transformer': []
 }
 
+# 进度追踪（0-100 整数），前端进度条据此更新
+training_progress = {k: 0 for k in training_status}
+
 def add_message(task, msg):
     if task in training_messages:
         training_messages[task].append(msg)
         if len(training_messages[task]) > 100:
             training_messages[task] = training_messages[task][-50:]
+
+def update_progress(task, value):
+    if task in training_progress:
+        training_progress[task] = max(0, min(100, int(value)))
 
 @app.route('/')
 def index():
@@ -152,45 +159,52 @@ def preprocess_data():
     dataset = request.json.get('dataset', 'full')
     training_status['preprocessing'] = 'running'
     training_messages['preprocessing'] = []
-    
+    training_progress['preprocessing'] = 0
+
     def run_preprocessing():
         try:
             data_file = 'KDDTrain+.txt' if dataset == 'full' else 'KDDTrain+_20Percent.txt'
             add_message('preprocessing', f'开始数据预处理（防数据泄漏版本：先切分，后拟合）...')
             add_message('preprocessing', f'使用数据集: {data_file}')
-            
+            update_progress('preprocessing', 5)
+
             import warnings
             warnings.filterwarnings('ignore')
-            
+
             from data_preprocessing.data_preprocessing import (
                 load_data, explore_data, preprocess_labels,
                 split_data, encode_and_scale,
                 COLUMN_NAMES, ATTACK_CATEGORIES, CATEGORICAL_FEATURES, NUMERIC_FEATURES
             )
-            
+
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             data_path = os.path.join(base_dir, 'Train', data_file)
-            
+
             if not os.path.exists(data_path):
                 add_message('preprocessing', f'错误: 数据文件不存在: {data_path}')
                 training_status['preprocessing'] = 'error'
                 return
-            
+
             add_message('preprocessing', f'加载数据: {data_path}')
             df = load_data(data_path)
-            
+            update_progress('preprocessing', 15)
+
             add_message('preprocessing', '数据探索中...')
             df = explore_data(df)
-            
+            update_progress('preprocessing', 25)
+
             add_message('preprocessing', '标签预处理中（生成 二分类 / 5大分类 / 23细分类 三种标签）...')
             df, le_category, le_multiclass = preprocess_labels(df)
             add_message('preprocessing', f'23 细分类共 {len(le_multiclass.classes_)} 个类别')
+            update_progress('preprocessing', 40)
 
             add_message('preprocessing', '数据集划分（训练70%/验证10%/测试20%，以 23 分类做分层采样）...')
             df_train, df_val, df_test = split_data(df, test_size=0.2, val_size=0.1)
+            update_progress('preprocessing', 55)
 
             add_message('preprocessing', '特征编码与标准化（仅训练集fit，验证/测试集只transform）...')
             df_train_p, df_val_p, df_test_p, ohe, scaler, ohe_names = encode_and_scale(df_train, df_val, df_test)
+            update_progress('preprocessing', 75)
 
             output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Train')
 
@@ -208,6 +222,7 @@ def preprocess_data():
             with open(class_list_path, 'w') as f:
                 for c in le_multiclass.classes_:
                     f.write(c + '\n')
+            update_progress('preprocessing', 95)
 
             add_message('preprocessing', f'预处理完成！')
             add_message('preprocessing', f'训练集: {df_train_p.shape}')
@@ -216,9 +231,10 @@ def preprocess_data():
             add_message('preprocessing', f'StandardScaler/OneHotEncoder 仅在训练集上 fit')
             add_message('preprocessing', f'验证集用于训练监控，测试集仅用于最终评估')
             add_message('preprocessing', f'已生成 23 细分类标签: normal + 22 种具体攻击类型')
-            
+
             training_status['preprocessing'] = 'completed'
-            
+            update_progress('preprocessing', 100)
+
         except Exception as e:
             add_message('preprocessing', f'错误: {str(e)}')
             training_status['preprocessing'] = 'error'
@@ -232,7 +248,8 @@ def preprocess_data():
 def get_preprocess_status():
     return jsonify({
         'status': training_status['preprocessing'],
-        'messages': training_messages['preprocessing']
+        'messages': training_messages['preprocessing'],
+        'progress': training_progress.get('preprocessing', 0)
     })
 
 @app.route('/data/distribution')
@@ -317,10 +334,12 @@ def train_model():
     
     training_status[model_name] = 'running'
     training_messages[model_name] = []
-    
+    training_progress[model_name] = 0
+
     def run_training():
         try:
             add_message(model_name, f'开始训练 {model_name} 模型（防数据泄漏版本）...')
+            update_progress(model_name, 3)
 
             import warnings
             warnings.filterwarnings('ignore')
@@ -376,6 +395,7 @@ def train_model():
             add_message(model_name, f'数据加载完成: 训练集 {len(X_train)}, 验证集 {len(X_val)}, 测试集 {len(X_test)}')
             add_message(model_name, f'特征数量: {len(feature_cols)}')
             add_message(model_name, f'验证集用于训练监控，测试集锁死至最终评估')
+            update_progress(model_name, 8)
             
             if model_name == 'xgboost':
                 os.environ['DYLD_LIBRARY_PATH'] = '/opt/homebrew/opt/libomp/lib:' + os.environ.get('DYLD_LIBRARY_PATH', '')
@@ -398,6 +418,7 @@ def train_model():
                     pickle.dump({'label_map': label_map, 'train_labels': train_labels,
                                  'num_class': actual_num_class}, _f)
                 add_message(model_name, f'已保存标签重编码映射（{actual_num_class} 类连续空间）')
+                update_progress(model_name, 12)
 
                 params = {
                     'n_estimators': 200,
@@ -414,12 +435,14 @@ def train_model():
 
                 add_message(model_name, f'XGBoost (23 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
                 add_message(model_name, '开始训练（eval_set 使用验证集，非测试集）...')
+                update_progress(model_name, 20)
 
                 start_time = time.time()
                 model = xgb.XGBClassifier(**params)
                 # 关键修复：eval_set 使用验证集，而非测试集
                 model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
                 train_time = time.time() - start_time
+                update_progress(model_name, 85)
 
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
                 
@@ -443,6 +466,7 @@ def train_model():
 
                 add_message(model_name, f'【DNN 多分类】输出维度={num_classes}, loss=CrossEntropyLoss')
                 add_message(model_name, '开始训练（epoch 监控使用验证集，非测试集）...')
+                update_progress(model_name, 12)
                 start_time = time.time()
                 
                 for epoch in range(50):
@@ -456,6 +480,8 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
                     
+                    update_progress(model_name, 12 + int((epoch + 1) / 50 * 76))
+
                     if (epoch + 1) % 10 == 0:
                         # 在验证集上计算 loss（非测试集）
                         model.eval()
@@ -464,6 +490,7 @@ def train_model():
                         add_message(model_name, f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
                 
                 train_time = time.time() - start_time
+                update_progress(model_name, 88)
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
             
             elif model_name == 'cnn1d':
@@ -485,6 +512,7 @@ def train_model():
 
                 add_message(model_name, f'【1D-CNN 多分类】输入序列长度={input_dim}, 输出维度={num_classes}, loss=CrossEntropyLoss')
                 add_message(model_name, '开始训练（epoch 监控使用验证集，非测试集）...')
+                update_progress(model_name, 12)
                 start_time = time.time()
 
                 for epoch in range(50):
@@ -498,6 +526,8 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
+                    update_progress(model_name, 12 + int((epoch + 1) / 50 * 76))
+
                     if (epoch + 1) % 10 == 0:
                         model.eval()
                         with torch.no_grad():
@@ -505,6 +535,7 @@ def train_model():
                         add_message(model_name, f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
+                update_progress(model_name, 88)
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
 
             elif model_name == 'transformer':
@@ -526,6 +557,7 @@ def train_model():
 
                 add_message(model_name, f'【Transformer 多分类】token数={input_dim}, d_model=64, 输出维度={num_classes}, loss=CrossEntropyLoss')
                 add_message(model_name, '开始训练（epoch 监控使用验证集，非测试集）...')
+                update_progress(model_name, 12)
                 start_time = time.time()
 
                 for epoch in range(50):
@@ -539,6 +571,8 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
+                    update_progress(model_name, 12 + int((epoch + 1) / 50 * 76))
+
                     if (epoch + 1) % 10 == 0:
                         model.eval()
                         with torch.no_grad():
@@ -546,10 +580,12 @@ def train_model():
                         add_message(model_name, f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
+                update_progress(model_name, 88)
                 add_message(model_name, f'训练完成，耗时: {train_time:.2f} 秒')
             
             # ========== 最终评估：仅在测试集上做单次评估 ==========
             add_message(model_name, '最终评估：在测试集上做单次评估（测试集首次参与）...')
+            update_progress(model_name, 92)
 
             from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 
@@ -613,9 +649,10 @@ def train_model():
             
             add_message(model_name, f'模型已保存至: {model_dir}')
             add_message(model_name, f'{model_name} 模型训练完成!')
-            
+
             training_status[model_name] = 'completed'
-            
+            update_progress(model_name, 100)
+
         except Exception as e:
             import traceback
             add_message(model_name, f'错误: {str(e)}')
@@ -631,10 +668,11 @@ def train_model():
 def get_train_status(model_name):
     if model_name not in ['xgboost', 'dnn', 'cnn1d', 'transformer']:
         return jsonify({'status': 'error', 'message': '无效的模型名称'})
-    
+
     return jsonify({
         'status': training_status[model_name],
-        'messages': training_messages[model_name]
+        'messages': training_messages[model_name],
+        'progress': training_progress.get(model_name, 0)
     })
 
 @app.route('/results/compare')
@@ -732,7 +770,7 @@ def get_feature_importance(model_name):
 
 @app.route('/reset/status')
 def reset_status():
-    global training_status, training_messages
+    global training_status, training_messages, training_progress
     training_status = {
         'xgboost': 'idle',
         'dnn': 'idle',
@@ -755,6 +793,7 @@ def reset_status():
         'test_cnn1d': [],
         'test_transformer': []
     }
+    training_progress = {k: 0 for k in training_status}
     return jsonify({'status': 'success'})
 
 @app.route('/test/model', methods=['POST'])
@@ -772,10 +811,12 @@ def test_model():
     
     training_status[task_key] = 'running'
     training_messages[task_key] = []
-    
+    training_progress[task_key] = 0
+
     def run_testing():
         try:
             add_message(task_key, f'开始测试 {model_name} 模型...')
+            update_progress(task_key, 3)
 
             import warnings
             warnings.filterwarnings('ignore')
@@ -799,6 +840,7 @@ def test_model():
             
             df_test = pd.read_csv(test_path, header=None, names=COLUMN_NAMES)
             add_message(task_key, f'测试数据形状: {df_test.shape}')
+            update_progress(task_key, 10)
             
             # 加载预处理器（训练时保存的）
             ohe_path = os.path.join(base_dir, 'Train', 'encoder_onehot.pkl')
@@ -829,6 +871,7 @@ def test_model():
             y_test = df_test['label_multiclass_encoded'].values
             unique_labels, label_counts = np.unique(y_test, return_counts=True)
             add_message(task_key, f'测试集多分类标签分布: {len(unique_labels)} 个类别, 样本数={len(y_test)}')
+            update_progress(task_key, 25)
             
             # One-Hot 编码（使用训练时 fit 的编码器）
             ohe_feature_names = ohe.get_feature_names_out(CATEGORICAL_FEATURES)
@@ -856,6 +899,7 @@ def test_model():
             numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
             df_test_enc[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
             add_message(task_key, f'测试数据预处理完成')
+            update_progress(task_key, 45)
             
             # 准备特征矩阵（优先使用训练集特征列，确保维度一致）
             if train_feature_cols:
@@ -885,6 +929,7 @@ def test_model():
                 return
             
             add_message(task_key, f'加载模型: {model_path}')
+            update_progress(task_key, 55)
             
             # 模型预测
             from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
@@ -955,6 +1000,7 @@ def test_model():
                         y_pred = y_pred_encoded.astype(np.int64)
 
             add_message(task_key, f'预测完成')
+            update_progress(task_key, 75)
 
             # 所有模型均为 23 分类任务，统一使用多分类评估指标
             accuracy = accuracy_score(y_test, y_pred)
@@ -1005,9 +1051,10 @@ def test_model():
             pd.DataFrame([test_results]).to_csv(results_path, index=False)
             add_message(task_key, f'测试结果已保存: {results_path}')
             add_message(task_key, f'{model_name} 模型测试完成!')
-            
+
             training_status[task_key] = 'completed'
-            
+            update_progress(task_key, 100)
+
         except Exception as e:
             import traceback
             add_message(task_key, f'错误: {str(e)}')
@@ -1027,7 +1074,8 @@ def get_test_status(model_name):
     
     return jsonify({
         'status': training_status[task_key],
-        'messages': training_messages[task_key]
+        'messages': training_messages[task_key],
+        'progress': training_progress.get(task_key, 0)
     })
 
 @app.route('/test/results/<model_name>')

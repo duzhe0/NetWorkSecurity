@@ -1,4 +1,5 @@
 import os
+
 # macOS 需要设置 libomp 路径才能加载 XGBoost
 os.environ['DYLD_LIBRARY_PATH'] = '/opt/homebrew/opt/libomp/lib:' + os.environ.get('DYLD_LIBRARY_PATH', '')
 
@@ -12,6 +13,7 @@ import seaborn as sns
 import joblib
 import time
 import warnings
+
 warnings.filterwarnings('ignore')
 
 # 设置中文显示
@@ -28,8 +30,8 @@ def load_preprocessed_data():
     data_dir = "../../Train/"
 
     df_train = pd.read_csv(os.path.join(data_dir, "KDDTrain_preprocessed_train.csv"))
-    df_val   = pd.read_csv(os.path.join(data_dir, "KDDTrain_preprocessed_val.csv"))
-    df_test  = pd.read_csv(os.path.join(data_dir, "KDDTrain_preprocessed_test.csv"))
+    df_val = pd.read_csv(os.path.join(data_dir, "KDDTrain_preprocessed_val.csv"))
+    df_test = pd.read_csv(os.path.join(data_dir, "KDDTrain_preprocessed_test.csv"))
 
     print(f"\n[数据加载] 训练集形状: {df_train.shape}")
     print(f"[数据加载] 验证集形状: {df_val.shape}")
@@ -57,14 +59,16 @@ def load_preprocessed_data():
             class_names = [line.strip() for line in f if line.strip()]
         num_classes = len(class_names)
     else:
-        # 兼容旧版本：从数据推断最大值+1
-        num_classes = int(max(df_train['label_multiclass_encoded'].max(),
-                              df_val['label_multiclass_encoded'].max(),
-                              df_test['label_multiclass_encoded'].max()) + 1)
+        # 兼容旧版本：从所有数据中取最大标签 + 1（确保覆盖所有可能出现的标签）
+        max_label = max(df_train['label_multiclass_encoded'].max(),
+                        df_val['label_multiclass_encoded'].max(),
+                        df_test['label_multiclass_encoded'].max())
+        num_classes = int(max_label + 1)
 
     print(f"\n【{num_classes} 分类任务】共 {num_classes} 个类别 (normal + {num_classes - 1} 种攻击)")
     print(f"特征数量: {len(feature_cols)}")
     print(f"训练集样本: {len(X_train)}, 验证集样本: {len(X_val)}, 测试集样本: {len(X_test)}")
+    print(f"训练集实际类别数: {len(np.unique(y_train))}, 唯一值: {sorted(np.unique(y_train))}")
 
     return X_train, X_val, X_test, y_train, y_val, y_test, feature_cols, num_classes
 
@@ -75,8 +79,30 @@ def train_xgboost(X_train, y_train, X_val, y_val, num_classes):
     print("模型训练")
     print("=" * 60)
 
-    # 【关键修复】直接使用全局类别数 num_classes，而不是 len(np.unique(y_train))
-    # 因为训练集可能缺少某些类别（如类别7、18），但必须保证 num_class 覆盖所有可能标签 0~22
+    # 【关键修复】检查训练集是否包含所有类别，缺失则补充虚拟样本（权重为0）
+    unique_train = np.unique(y_train)
+    if len(unique_train) < num_classes:
+        missing_classes = set(range(num_classes)) - set(unique_train)
+        print(f"训练集中缺少类别: {sorted(missing_classes)}，将添加虚拟样本（权重为0）以覆盖所有类别")
+
+        # 创建虚拟样本（特征全0）
+        num_missing = len(missing_classes)
+        X_dummy = np.zeros((num_missing, X_train.shape[1]), dtype=np.float32)
+        y_dummy = np.array(list(missing_classes), dtype=np.int64)
+
+        # 合并数据
+        X_train_aug = np.vstack([X_train, X_dummy])
+        y_train_aug = np.concatenate([y_train, y_dummy])
+
+        # 设置样本权重：原始样本权重为1，虚拟样本权重为0
+        sample_weight = np.ones(len(X_train_aug), dtype=np.float32)
+        sample_weight[-num_missing:] = 0.0
+
+        print(f"增强后训练集大小: {len(X_train_aug)}，其中虚拟样本 {num_missing} 个")
+    else:
+        X_train_aug = X_train
+        y_train_aug = y_train
+        sample_weight = None
 
     # XGBoost参数设置（多分类）
     params = {
@@ -84,7 +110,7 @@ def train_xgboost(X_train, y_train, X_val, y_val, num_classes):
         'max_depth': 8,
         'learning_rate': 0.1,
         'objective': 'multi:softprob',
-        'num_class': num_classes,          # 使用全局类别数 23
+        'num_class': num_classes,  # 使用全局类别数
         'eval_metric': 'mlogloss',
         'use_label_encoder': False,
         'random_state': 42,
@@ -101,11 +127,21 @@ def train_xgboost(X_train, y_train, X_val, y_val, num_classes):
     start_time = time.time()
 
     model = xgb.XGBClassifier(**params)
-    model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+    # 如果有样本权重则传入，否则使用默认
+    if sample_weight is not None:
+        model.fit(X_train_aug, y_train_aug,
+                  sample_weight=sample_weight,
+                  eval_set=[(X_val, y_val)],
+                  verbose=False)
+    else:
+        model.fit(X_train_aug, y_train_aug,
+                  eval_set=[(X_val, y_val)],
+                  verbose=False)
 
     train_time = time.time() - start_time
     print(f"训练完成，耗时: {train_time:.2f} 秒")
 
+    # 注意：模型已经训练完毕，后续评估仍使用原始的 X_train, y_train（不含虚拟样本）
     return model, train_time
 
 
@@ -131,7 +167,7 @@ def evaluate_model(model, X_train, X_test, y_train, y_test, num_classes):
     test_f1 = f1_score(y_test, y_test_pred, average='weighted', zero_division=0)
     try:
         test_auc = roc_auc_score(y_test, y_test_prob_matrix, multi_class='ovr',
-                                  average='weighted', labels=list(range(num_classes)))
+                                 average='weighted', labels=list(range(num_classes)))
     except Exception:
         test_auc = float('nan')
 
@@ -240,7 +276,7 @@ def main():
     # 2. 训练XGBoost模型（eval_set使用验证集）
     model, train_time = train_xgboost(X_train, y_train, X_val, y_val, num_classes)
 
-    # 3. 用测试集做最终评估
+    # 3. 用测试集做最终评估（训练集评估使用原始训练数据，不含虚拟样本）
     metrics, y_pred, y_prob = evaluate_model(model, X_train, X_test, y_train, y_test, num_classes)
 
     # 4. 可视化结果
