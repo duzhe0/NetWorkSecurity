@@ -21,7 +21,7 @@ Train/KDDTrain_preprocessed_train.csv
 Train/KDDTrain_preprocessed_val.csv
 Train/KDDTrain_preprocessed.csv
 Train/preprocessing_metadata.pkl
-Train/scaler_standard.pkl
+Train/scaler_robust.pkl
 Visualization/confusion_matrix_comparison.png
 Visualization/confusion_matrix_comparison_external.png
 web_app/__pycache__/

@@ -200,7 +200,7 @@ def preprocess_data():
 
             import joblib
             joblib.dump(ohe, os.path.join(output_dir, 'encoder_onehot.pkl'))
-            joblib.dump(scaler, os.path.join(output_dir, 'scaler_standard.pkl'))
+            joblib.dump(scaler, os.path.join(output_dir, 'scaler_robust.pkl'))
             # 保存 23 分类标签编码器
             joblib.dump(le_multiclass, os.path.join(output_dir, 'encoder_multiclass_23.pkl'))
             # 同时保存纯文本类别列表（跨 sklearn 版本兼容）
@@ -858,7 +858,7 @@ def test_model():
             
             # 加载预处理器（训练时保存的）
             ohe_path = os.path.join(base_dir, 'Train', 'encoder_onehot.pkl')
-            scaler_path = os.path.join(base_dir, 'Train', 'scaler_standard.pkl')
+            scaler_path = os.path.join(base_dir, 'Train', 'scaler_robust.pkl')
             
             if not os.path.exists(ohe_path) or not os.path.exists(scaler_path):
                 add_message(task_key, '错误: 预处理器文件不存在，请先运行数据预处理')
@@ -931,6 +931,20 @@ def test_model():
             
             # 标准化（使用训练时 fit 的标准化器）
             numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
+            # Binary Indicator
+            ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+            BINARY_INDICATOR_COLS = []
+            for col in ZERO_INFLATED_COLS:
+                if col in df_test_enc.columns:
+                    indicator_name = f'is_zero_{col}'
+                    df_test_enc[indicator_name] = (df_test_enc[col] == 0).astype(int)
+                    BINARY_INDICATOR_COLS.append(indicator_name)
+            # Log1p transform
+            LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+            for col in LOGP1_COLS:
+                if col in df_test_enc.columns:
+                    df_test_enc[col] = np.log1p(df_test_enc[col])
+            numeric_cols.extend(BINARY_INDICATOR_COLS)
             df_test_enc[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
             add_message(task_key, f'测试数据预处理完成')
             update_progress(task_key, 45)

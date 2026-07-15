@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
+from sklearn.preprocessing import RobustScaler, LabelEncoder, OneHotEncoder
 from sklearn.model_selection import train_test_split
 import joblib
 import argparse
@@ -165,7 +165,7 @@ def preprocess_labels(df):
 
     print("\n【24 分类标签标准映射】")
     for i, class_name in enumerate(canonical_classes):
-        has_sample = "✓" if i in actual_labels else "✗"
+        has_sample = "[Y]" if i in actual_labels else "[N]"
         print(f"  {i} -> {class_name} {has_sample}")
 
     return df, le_category, canonical_classes
@@ -241,7 +241,7 @@ def split_data(df, test_size=0.2, val_size=0.1, random_state=42):
 
 def encode_and_scale(df_train, df_val, df_test):
     """
-    在训练集上 fit OneHotEncoder 和 StandardScaler，
+    在训练集上 fit OneHotEncoder 和 RobustScaler，
     对验证集和测试集只做 transform，严格防止数据泄漏
     """
     print("\n" + "=" * 60)
@@ -258,6 +258,23 @@ def encode_and_scale(df_train, df_val, df_test):
     print(f"\n[特征剔除] 已移除 {len(DROP_COLS)} 列: {DROP_COLS}")
     print(f"  移除原因: 常数或近似常数（信息量≈0）")
     print(f"  移除后数值特征: {len([c for c in NUMERIC_FEATURES if c not in DROP_COLS])} 列")
+
+    # ========== 零膨胀 Binary Indicator ==========
+    # 对大量为 0 的列创建 is_zero 标记，保留"是否为 0"的区分信号
+    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    BINARY_INDICATOR_COLS = []
+    for col in ZERO_INFLATED_COLS:
+        if col in df_train.columns:
+            indicator_name = f'is_zero_{col}'
+            df_train[indicator_name] = (df_train[col] == 0).astype(int)
+            df_val[indicator_name] = (df_val[col] == 0).astype(int)
+            df_test[indicator_name] = (df_test[col] == 0).astype(int)
+            BINARY_INDICATOR_COLS.append(indicator_name)
+
+    zero_ratio = {col: (df_train[col] == 0).mean() for col in ZERO_INFLATED_COLS if col in df_train.columns}
+    print(f"\n[Binary Indicator] 新增 {len(BINARY_INDICATOR_COLS)} 列: {BINARY_INDICATOR_COLS}")
+    for col, ratio in zero_ratio.items():
+        print(f"  {col}: {ratio:.1%} 的值为 0")
 
     # ---------- One-Hot 编码 ----------
     print("\n[One-Hot 编码] 使用 sklearn OneHotEncoder（可持久化，对新数据一致）")
@@ -291,11 +308,26 @@ def encode_and_scale(df_train, df_val, df_test):
     df_val_enc = df_val_enc[df_train_enc.columns]
     df_test_enc = df_test_enc[df_train_enc.columns]
 
-    # ---------- 数值型特征标准化 ----------
-    print("\n[标准化] StandardScaler: 仅在训练集上 fit")
+    # ========== Log1p 变换：压缩极端偏态分布 ==========
+    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    for col in LOGP1_COLS:
+        if col in df_train_enc.columns:
+            df_train_enc[col] = np.log1p(df_train_enc[col])
+            df_val_enc[col] = np.log1p(df_val_enc[col])
+            df_test_enc[col] = np.log1p(df_test_enc[col])
+    applied_cols = [c for c in LOGP1_COLS if c in df_train_enc.columns]
+    print(f"\n[Log1p 变换] 对 {len(applied_cols)} 个偏态列应用 log1p: {applied_cols}")
+    for col in applied_cols:
+        print(f"  {col}: min={df_train_enc[col].min():.2f}, max={df_train_enc[col].max():.2f}, "
+              f"median={df_train_enc[col].median():.2f}")
+
+    # ---------- 数值型特征缩放 ----------
+    print("\n[缩放] RobustScaler: 仅在训练集上 fit（中位数/IQR，抗异常值）")
 
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_train_enc.columns]
-    scaler = StandardScaler()
+    numeric_cols.extend(BINARY_INDICATOR_COLS)  # 纳入新增的 is_zero_* 列
+    print(f"  缩放列数: {len(numeric_cols)}（含 {len(BINARY_INDICATOR_COLS)} 个 Binary Indicator）")
+    scaler = RobustScaler()
     scaler.fit(df_train_enc[numeric_cols])
 
     df_train_scaled = df_train_enc.copy()
@@ -309,9 +341,9 @@ def encode_and_scale(df_train, df_val, df_test):
     # 测试集: 仅 transform
     df_test_scaled[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
 
-    print(f"  已对 {len(numeric_cols)} 个数值型特征进行标准化")
-    print(f"  训练集标准化后均值(前5): {df_train_scaled[numeric_cols[:5]].mean().values.round(4)}")
-    print(f"  训练集标准化后标准差(前5): {df_train_scaled[numeric_cols[:5]].std().values.round(4)}")
+    print(f"  已对 {len(numeric_cols)} 个数值型特征进行缩放")
+    print(f"  训练集缩放后中位数(前5): {np.median(df_train_scaled[numeric_cols[:5]].values, axis=0).round(4)}")
+    print(f"  训练集缩放后IQR(前5): {np.subtract(*np.percentile(df_train_scaled[numeric_cols[:5]].values, [75, 25], axis=0)).round(4)}")
 
     return df_train_scaled, df_val_scaled, df_test_scaled, ohe, scaler, ohe_feature_names
 
@@ -363,14 +395,15 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     print(f"验证集形状: {df_val_processed.shape}")
     print(f"测试集形状: {df_test_processed.shape}")
     print(f"特征矩阵列数: {len(feature_cols)}")
-    print(f"  - 数值型特征: {len([c for c in NUMERIC_FEATURES if c in feature_cols])} 个（已标准化）")
+    print(f"  - 数值型特征: {len([c for c in NUMERIC_FEATURES if c in feature_cols])} 个（已缩放）+ "
+          f"{sum(1 for c in feature_cols if 'is_zero_' in c)} 个 Binary Indicator")
     print(f"  - One-Hot编码特征: {len(ohe_feature_names)} 个")
     print(f"标签列:")
     print(f"  - label_binary: 二分类 (normal/attack)")
     print(f"  - label_category_encoded: 5大分类 (normal/dos/probe/r2l/u2r)")
     print(f"  - label_multiclass_encoded: 24细分类 (normal + 22种攻击 + unknown_attack)")
     print(f"\n关键原则:")
-    print(f"  - StandardScaler 仅在训练集上 fit，验证/测试集只 transform")
+    print(f"  - RobustScaler 仅在训练集上 fit，验证/测试集只 transform")
     print(f"  - OneHotEncoder 仅在训练集上 fit，验证/测试集只 transform")
     print(f"  - 验证集用于训练过程监控（Early Stopping / Epoch评估）")
     print(f"  - 测试集绝对不参与训练过程，仅做最终评估")
@@ -384,7 +417,7 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
 
     # 保存编码器和标准化器（供未来新数据使用）
     joblib.dump(ohe, f"{output_dir}/encoder_onehot.pkl")
-    joblib.dump(scaler, f"{output_dir}/scaler_standard.pkl")
+    joblib.dump(scaler, f"{output_dir}/scaler_robust.pkl")
     joblib.dump({'feature_cols': feature_cols, 'ohe_feature_names': list(ohe_feature_names)},
                 f"{output_dir}/preprocessing_metadata.pkl")
     # 保存 24 分类标签列表（供模型推理时将预测索引映射回具体类型）
@@ -402,7 +435,7 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     print(f"  验证集: {output_dir}/KDDTrain_preprocessed_val.csv")
     print(f"  测试集: {output_dir}/KDDTrain_preprocessed_test.csv")
     print(f"  OneHot编码器: {output_dir}/encoder_onehot.pkl")
-    print(f"  标准化器: {output_dir}/scaler_standard.pkl")
+    print(f"  缩放器: {output_dir}/scaler_robust.pkl")
     print(f"  预处理元数据: {output_dir}/preprocessing_metadata.pkl")
     print(f"  23分类标签编码器: {output_dir}/encoder_multiclass_23.pkl")
     print(f"  5分类标签编码器: {output_dir}/encoder_category_5.pkl")

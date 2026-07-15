@@ -33,7 +33,7 @@ from sklearn.metrics import (
 def load_preprocessors(base_dir):
     """加载预处理器（训练时保存的）"""
     ohe_path = os.path.join(base_dir, 'Train', 'encoder_onehot.pkl')
-    scaler_path = os.path.join(base_dir, 'Train', 'scaler_standard.pkl')
+    scaler_path = os.path.join(base_dir, 'Train', 'scaler_robust.pkl')
     
     if not os.path.exists(ohe_path):
         raise FileNotFoundError(f"OneHotEncoder 不存在: {ohe_path}\n请先运行数据预处理")
@@ -80,6 +80,20 @@ def preprocess_test_data(test_path, base_dir, ohe, scaler):
     
     # 标准化
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
+    # Binary Indicator
+    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    BINARY_INDICATOR_COLS = []
+    for col in ZERO_INFLATED_COLS:
+        if col in df_test_enc.columns:
+            indicator_name = f'is_zero_{col}'
+            df_test_enc[indicator_name] = (df_test_enc[col] == 0).astype(int)
+            BINARY_INDICATOR_COLS.append(indicator_name)
+    # Log1p transform
+    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    for col in LOGP1_COLS:
+        if col in df_test_enc.columns:
+            df_test_enc[col] = np.log1p(df_test_enc[col])
+    numeric_cols.extend(BINARY_INDICATOR_COLS)
     df_test_enc[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
     
     # 准备特征矩阵

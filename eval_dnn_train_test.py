@@ -64,7 +64,7 @@ def load_and_preprocess(base_dir, model_name, class_names):
     """加载 train_test 并预处理，返回 (X_test, y_test, feature_cols)"""
 
     ohe_path = os.path.join(base_dir, 'Train', 'encoder_onehot.pkl')
-    scaler_path = os.path.join(base_dir, 'Train', 'scaler_standard.pkl')
+    scaler_path = os.path.join(base_dir, 'Train', 'scaler_robust.pkl')
     ohe = joblib.load(ohe_path)
     scaler = joblib.load(scaler_path)
     print(f"[预处理] 已加载 OneHotEncoder 和 StandardScaler")
@@ -110,6 +110,20 @@ def load_and_preprocess(base_dir, model_name, class_names):
 
     # 标准化
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
+    # Binary Indicator
+    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    BINARY_INDICATOR_COLS = []
+    for col in ZERO_INFLATED_COLS:
+        if col in df_test_enc.columns:
+            indicator_name = f'is_zero_{col}'
+            df_test_enc[indicator_name] = (df_test_enc[col] == 0).astype(int)
+            BINARY_INDICATOR_COLS.append(indicator_name)
+    # Log1p transform
+    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    for col in LOGP1_COLS:
+        if col in df_test_enc.columns:
+            df_test_enc[col] = np.log1p(df_test_enc[col])
+    numeric_cols.extend(BINARY_INDICATOR_COLS)
     df_test_enc[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
 
     X_test = df_test_enc[feature_cols].values.astype(np.float32)

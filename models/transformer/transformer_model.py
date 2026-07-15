@@ -320,7 +320,7 @@ def evaluate_external_test_transformer(model, num_classes, class_names, device):
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     ohe_path = os.path.join(base_dir, 'Train', 'encoder_onehot.pkl')
-    scaler_path = os.path.join(base_dir, 'Train', 'scaler_standard.pkl')
+    scaler_path = os.path.join(base_dir, 'Train', 'scaler_robust.pkl')
     ohe = _joblib.load(ohe_path)
     scaler = _joblib.load(scaler_path)
 
@@ -355,6 +355,20 @@ def evaluate_external_test_transformer(model, num_classes, class_names, device):
     df_test_enc = df_test_enc[feature_cols]
 
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
+    # Binary Indicator
+    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    BINARY_INDICATOR_COLS = []
+    for col in ZERO_INFLATED_COLS:
+        if col in df_test_enc.columns:
+            indicator_name = f'is_zero_{col}'
+            df_test_enc[indicator_name] = (df_test_enc[col] == 0).astype(int)
+            BINARY_INDICATOR_COLS.append(indicator_name)
+    # Log1p transform
+    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    for col in LOGP1_COLS:
+        if col in df_test_enc.columns:
+            df_test_enc[col] = np.log1p(df_test_enc[col])
+    numeric_cols.extend(BINARY_INDICATOR_COLS)
     df_test_enc[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
 
     X_test = df_test_enc[feature_cols].values.astype(np.float32)
