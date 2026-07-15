@@ -1,6 +1,8 @@
 data/
 AIMemory/
-data_preprocessing/__pycache__/
+__pycache__/
+*.pyc
+.DS_Store
 models/dnn/*.pth
 models/dnn/*.csv
 models/xgboost/*.pkl
@@ -24,4 +26,3 @@ Train/preprocessing_metadata.pkl
 Train/scaler_standard.pkl
 Visualization/confusion_matrix_comparison.png
 Visualization/confusion_matrix_comparison_external.png
-web_app/__pycache__/
