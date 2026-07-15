@@ -499,12 +499,14 @@ def train_model():
                     
                     update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
-                    if (epoch + 1) % 10 == 0:
-                        # 在验证集上计算 loss（非测试集）
+                    if (epoch + 1) % 5 == 0:
+                        # 在验证集上计算 loss 和准确率（非测试集）
                         model.eval()
                         with torch.no_grad():
-                            val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                            val_logits = model(X_val_tensor)
+                            val_loss = criterion(val_logits, y_val_tensor).item()
+                            val_acc = (torch.argmax(val_logits, dim=1) == y_val_tensor).float().mean().item()
+                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.4f}')
                 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -545,11 +547,13 @@ def train_model():
 
                     update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
-                    if (epoch + 1) % 10 == 0:
+                    if (epoch + 1) % 5 == 0:
                         model.eval()
                         with torch.no_grad():
-                            val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                            val_logits = model(X_val_tensor)
+                            val_loss = criterion(val_logits, y_val_tensor).item()
+                            val_acc = (torch.argmax(val_logits, dim=1) == y_val_tensor).float().mean().item()
+                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.4f}')
 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -590,11 +594,13 @@ def train_model():
 
                     update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
-                    if (epoch + 1) % 10 == 0:
+                    if (epoch + 1) % 5 == 0:
                         model.eval()
                         with torch.no_grad():
-                            val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                            val_logits = model(X_val_tensor)
+                            val_loss = criterion(val_logits, y_val_tensor).item()
+                            val_acc = (torch.argmax(val_logits, dim=1) == y_val_tensor).float().mean().item()
+                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.4f}')
 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -641,6 +647,19 @@ def train_model():
             add_message(task_key,f'  F1-Score (weighted): {f1:.4f}')
             add_message(task_key,f'  AUC: {auc:.4f}')
             add_message(task_key,f'  混淆矩阵: {cm}')
+
+            # 每类详细指标（分类报告）：展示稀有攻击(r2l/u2r 等)的召回情况
+            try:
+                from sklearn.metrics import classification_report
+                _names = class_names if 'class_names' in locals() and class_names else None
+                report = classification_report(y_test, y_pred, labels=list(range(eval_classes)),
+                                               target_names=_names, zero_division=0)
+                add_message(task_key, '每类详细指标 (precision/recall/f1):')
+                for _line in report.split('\n'):
+                    if _line.strip():
+                        add_message(task_key, _line)
+            except Exception as _e:
+                add_message(task_key, f'分类报告生成失败: {_e}')
             
             metrics = {
                 'test_acc': accuracy,

@@ -775,6 +775,8 @@
                 .then(response => response.json())
                 .then(data => {
                     const logArea = document.getElementById('preprocess-log');
+                    // 后端返回完整消息列表，先清空再重建，避免重复堆积
+                    logArea.innerHTML = '';
                     data.messages.forEach(msg => {
                         const div = document.createElement('div');
                         div.className = 'log-item';
@@ -1024,6 +1026,8 @@
                     const status = document.getElementById(`status-${modelName}`);
                     const btn = document.getElementById(`btn-${modelName}`);
 
+                    // 后端返回完整消息列表，先清空再重建，避免重复堆积
+                    logArea.innerHTML = '';
                     data.messages.forEach(msg => {
                         const div = document.createElement('div');
                         div.className = 'log-item';
@@ -1287,6 +1291,8 @@
                     const logArea = document.getElementById(`test-log-${modelName}`);
                     const status = document.getElementById(`test-status-${modelName}`);
 
+                    // 后端返回完整消息列表，先清空再重建，避免重复堆积
+                    logArea.innerHTML = '';
                     data.messages.forEach(msg => {
                         const div = document.createElement('div');
                         div.className = 'log-item';
