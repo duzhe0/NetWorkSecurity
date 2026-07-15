@@ -25,3 +25,5 @@ Train/scaler_standard.pkl
 Visualization/confusion_matrix_comparison.png
 Visualization/confusion_matrix_comparison_external.png
 web_app/__pycache__/
+*.npy
+*.png

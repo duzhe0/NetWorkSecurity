@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score, roc_curve
+from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 import seaborn as sns
 import time
@@ -18,6 +19,34 @@ from torch.utils.data import DataLoader, TensorDataset
 # 设置中文显示
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
+
+# =============== 常量定义（与预处理模块一致）===============
+COLUMN_NAMES = [
+    'duration', 'protocol_type', 'service', 'flag', 'src_bytes', 'dst_bytes',
+    'land', 'wrong_fragment', 'urgent', 'hot', 'num_failed_logins', 'logged_in',
+    'num_compromised', 'root_shell', 'su_attempted', 'num_root', 'num_file_creations',
+    'num_shells', 'num_access_files', 'num_outbound_cmds', 'is_host_login',
+    'is_guest_login', 'count', 'srv_count', 'serror_rate', 'srv_serror_rate',
+    'rerror_rate', 'srv_rerror_rate', 'same_srv_rate', 'diff_srv_rate',
+    'srv_diff_host_rate', 'dst_host_count', 'dst_host_srv_count',
+    'dst_host_same_srv_rate', 'dst_host_diff_srv_rate', 'dst_host_same_src_port_rate',
+    'dst_host_srv_diff_host_rate', 'dst_host_serror_rate', 'dst_host_srv_serror_rate',
+    'dst_host_rerror_rate', 'dst_host_srv_rerror_rate', 'label', 'difficulty'
+]
+
+CATEGORICAL_FEATURES = ['protocol_type', 'service', 'flag']
+NUMERIC_FEATURES = [
+    'duration', 'src_bytes', 'dst_bytes', 'land', 'wrong_fragment', 'urgent',
+    'hot', 'num_failed_logins', 'logged_in', 'num_compromised', 'root_shell',
+    'su_attempted', 'num_root', 'num_file_creations', 'num_shells', 'num_access_files',
+    'num_outbound_cmds', 'is_host_login', 'is_guest_login', 'count', 'srv_count',
+    'serror_rate', 'srv_serror_rate', 'rerror_rate', 'srv_rerror_rate',
+    'same_srv_rate', 'diff_srv_rate', 'srv_diff_host_rate', 'dst_host_count',
+    'dst_host_srv_count', 'dst_host_same_srv_rate', 'dst_host_diff_srv_rate',
+    'dst_host_same_src_port_rate', 'dst_host_srv_diff_host_rate',
+    'dst_host_serror_rate', 'dst_host_srv_serror_rate', 'dst_host_rerror_rate',
+    'dst_host_srv_rerror_rate'
+]
 
 
 class DNN(nn.Module):
@@ -96,8 +125,12 @@ def load_preprocessed_data():
     return X_train, X_val, X_test, y_train, y_val, y_test, feature_cols, num_classes
 
 
-def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size=64):
-    """训练DNN模型（多分类），在验证集上监控"""
+def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size=64,
+              weight_scheme='sqrt'):
+    """训练DNN模型（多分类），在验证集上监控
+    
+    weight_scheme: 'none' | 'balanced' | 'sqrt' | 'log1p'
+    """
     print("\n" + "=" * 60)
     print("模型训练")
     print("=" * 60)
@@ -123,8 +156,38 @@ def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size
     print(f"\n使用设备: {device}")
 
     model = DNN(input_dim, num_classes, hidden_dims, dropout_rate).to(device)
-    # 多分类：使用 CrossEntropyLoss
-    criterion = nn.CrossEntropyLoss()
+
+    # 类别加权
+    if weight_scheme == 'none':
+        class_weights_tensor = None
+        print(f"\n[类别加权] 方案: none（无权重）")
+    else:
+        # 只对训练集中实际存在的类别计算权重，缺失类别权重=0
+        unique_train = np.unique(y_train)
+        balanced_full = np.zeros(num_classes)
+        present_weights = compute_class_weight('balanced', classes=unique_train, y=y_train)
+        for i, cls in enumerate(unique_train):
+            balanced_full[cls] = present_weights[i]
+
+        if weight_scheme == 'balanced':
+            class_weights = balanced_full
+        elif weight_scheme == 'sqrt':
+            class_weights = np.sqrt(balanced_full)
+        elif weight_scheme == 'log1p':
+            class_weights = np.log1p(balanced_full)
+        else:
+            raise ValueError(f"未知的 weight_scheme: {weight_scheme}")
+        class_weights_tensor = torch.FloatTensor(class_weights).to(device)
+        # 日志仅显示非零权重
+        nonzero = class_weights[class_weights > 0]
+        print(f"\n[类别加权] 方案: {weight_scheme}")
+        print(f"[类别加权] 非零权重范围: {nonzero.min():.4f} ~ {nonzero.max():.4f}")
+        if np.any(class_weights == 0):
+            zero_classes = np.where(class_weights == 0)[0]
+            print(f"[类别加权] 训练集缺失类别（权重=0）: {list(zero_classes)}")
+
+    # 多分类：使用 CrossEntropyLoss（可加权）
+    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # 准备训练和验证数据
@@ -247,6 +310,93 @@ def evaluate_model(model, X_test, y_test, device, num_classes):
     return metrics, y_pred, y_prob_matrix
 
 
+def evaluate_external_test_dnn(model, num_classes, class_names, device):
+    """在外部 train_test 集上评估 DNN 模型（零信息泄露）"""
+    print("\n" + "=" * 60)
+    print("外部评估 (train_test)")
+    print("=" * 60)
+
+    import joblib as _joblib
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    # 加载预处理工具
+    ohe_path = os.path.join(base_dir, 'Train', 'encoder_onehot.pkl')
+    scaler_path = os.path.join(base_dir, 'Train', 'scaler_standard.pkl')
+    ohe = _joblib.load(ohe_path)
+    scaler = _joblib.load(scaler_path)
+
+    # 加载 train_test 原始数据
+    test_path = os.path.join(base_dir, 'Train', 'train_test')
+    df_test = pd.read_csv(test_path, header=None, names=COLUMN_NAMES)
+    print(f"[外部数据] train_test 原始: {df_test.shape}")
+
+    # 生成标签：未知攻击 → 最后一类（unknown_attack）
+    if class_names:
+        unknown_idx = len(class_names) - 1
+        label_to_idx = {name: i for i, name in enumerate(class_names)}
+        df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(unknown_idx).astype(int)
+    else:
+        df_test['label_multiclass_encoded'] = 0
+
+    y_test_orig = df_test['label_multiclass_encoded'].values
+
+    # 从训练集获取特征列顺序
+    train_csv_path = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_train.csv')
+    df_train_sample = pd.read_csv(train_csv_path, nrows=1)
+    exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category',
+                    'label_category_encoded', 'label_multiclass', 'label_multiclass_encoded']
+    feature_cols = [c for c in df_train_sample.columns if c not in exclude_cols]
+
+    # One-Hot 编码（仅 transform）
+    ohe_feature_names = ohe.get_feature_names_out(CATEGORICAL_FEATURES)
+    ohe_array = ohe.transform(df_test[CATEGORICAL_FEATURES])
+    df_ohe = pd.DataFrame(ohe_array, columns=ohe_feature_names, index=df_test.index)
+    df_rest = df_test.drop(columns=CATEGORICAL_FEATURES)
+    df_test_enc = pd.concat([df_rest, df_ohe], axis=1)
+
+    # 补齐训练集有的列
+    for col in feature_cols:
+        if col not in df_test_enc.columns:
+            df_test_enc[col] = 0.0
+    df_test_enc = df_test_enc[feature_cols]
+
+    # 标准化（仅 transform）
+    numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
+    df_test_enc[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
+
+    X_test = df_test_enc[feature_cols].values.astype(np.float32)
+    print(f"[外部数据] 预处理完成，特征矩阵: {X_test.shape}")
+
+    # DNN 标签恒等映射（模型输出 24 维，未知攻击已在上游映射为 23）
+    y_test = y_test_orig.copy()
+    valid_mask = y_test >= 0
+    n_dropped = int((~valid_mask).sum())
+    if n_dropped > 0:
+        print(f"[外部数据] 剔除 {n_dropped} 个非法标签样本（不应出现）")
+
+    # 预测
+    model.eval()
+    X_tensor = torch.FloatTensor(X_test).to(device)
+    with torch.no_grad():
+        logits = model(X_tensor).cpu().numpy()
+
+    exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
+    y_prob = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+    y_pred = np.argmax(y_prob, axis=1)
+
+    y_true_v = y_test[valid_mask]
+    y_pred_v = y_pred[valid_mask]
+    y_prob_v = y_prob[valid_mask]
+
+    ext_acc = accuracy_score(y_true_v, y_pred_v)
+    ext_f1 = f1_score(y_true_v, y_pred_v, average='weighted', zero_division=0)
+
+    print(f"[外部评估] Acc: {ext_acc:.4f}, F1: {ext_f1:.4f}")
+
+    ext_cm = confusion_matrix(y_true_v, y_pred_v, labels=list(range(num_classes)))
+    return {'ext_acc': ext_acc, 'ext_f1': ext_f1}, ext_cm
+
+
 def plot_results(y_test, y_pred, y_prob, history, num_classes):
     """可视化结果（多分类）"""
     print("\n" + "=" * 60)
@@ -336,28 +486,83 @@ def save_results(model, metrics, train_time, history):
 
 
 def main():
-    """主函数"""
+    """主函数：多方案对比 + 双轨评估"""
     # 1. 加载预处理数据（训练集、验证集、测试集）
     X_train, X_val, X_test, y_train, y_val, y_test, feature_cols, num_classes = load_preprocessed_data()
 
-    # 2. 训练DNN模型（在验证集上监控）
-    model, train_time, history, device = train_dnn(X_train, X_val, y_train, y_val, num_classes)
+    # 加载类别名
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    class_file = os.path.join(base_dir, 'Train', 'encoder_multiclass_23_classes.txt')
+    class_names = []
+    if os.path.exists(class_file):
+        with open(class_file, 'r') as f:
+            class_names = [line.strip() for line in f if line.strip()]
 
-    # 3. 在测试集上做最终评估（仅一次）
-    metrics, y_pred, y_prob = evaluate_model(model, X_test, y_test, device, num_classes)
+    # 方案列表
+    schemes = ['none', 'balanced', 'sqrt', 'log1p']
 
-    # 4. 可视化结果
-    plot_results(y_test, y_pred, y_prob, history, num_classes)
+    all_results = []
 
-    # 5. 保存结果
-    save_results(model, metrics, train_time, history)
+    print("\n" + "=" * 70)
+    print("DNN 多方案类别加权对比实验")
+    print("=" * 70)
+
+    for scheme in schemes:
+        print("\n" + "#" * 70)
+        print(f"# 方案: {scheme}")
+        print("#" * 70)
+
+        # 2. 训练
+        model, train_time, history, device = train_dnn(
+            X_train, X_val, y_train, y_val, num_classes,
+            weight_scheme=scheme)
+
+        # 3. 内部测试集评估
+        metrics, y_pred, y_prob = evaluate_model(model, X_test, y_test, device, num_classes)
+        np.save(f'cm_internal_{scheme}.npy', metrics['confusion_matrix'])
+
+        # 4. 外部 train_test 评估
+        ext_metrics, ext_cm = evaluate_external_test_dnn(model, num_classes, class_names, device)
+        np.save(f'cm_external_{scheme}.npy', ext_cm)
+
+        # 5. 保存模型（按方案命名）
+        torch.save(model.state_dict(), f'model_dnn_{scheme}.pth')
+        print(f"[保存] model_dnn_{scheme}.pth")
+
+        # 汇总记录
+        result = {
+            'scheme': scheme,
+            'internal_acc': metrics['test_acc'],
+            'internal_f1': metrics['f1'],
+            'internal_auc': metrics['auc'],
+            'external_acc': ext_metrics['ext_acc'],
+            'external_f1': ext_metrics['ext_f1'],
+            'train_time': train_time
+        }
+        all_results.append(result)
+
+    # 打印汇总表
+    print("\n" + "=" * 90)
+    print("DNN 多方案双轨评估汇总")
+    print("=" * 90)
+    print(f"{'方案':<12} {'内部Acc':>10} {'内部F1':>10} {'内部AUC':>10} {'外部Acc':>10} {'外部F1':>10} {'耗时(s)':>8}")
+    print("-" * 90)
+    for r in all_results:
+        print(f"{r['scheme']:<12} {r['internal_acc']:>10.4f} {r['internal_f1']:>10.4f} "
+              f"{r['internal_auc']:>10.4f} {r['external_acc']:>10.4f} {r['external_f1']:>10.4f} "
+              f"{r['train_time']:>8.1f}")
+
+    # 保存汇总 CSV
+    df_summary = pd.DataFrame(all_results)
+    df_summary.to_csv('results_dnn_schemes_summary.csv', index=False)
+    print("\n[保存] 汇总表已保存: results_dnn_schemes_summary.csv")
 
     print("\n" + "=" * 60)
-    print("DNN 模型训练完成!")
+    print("DNN 多方案对比完成!")
     print("=" * 60)
 
-    return model, metrics, history
+    return all_results
 
 
 if __name__ == '__main__':
-    model, metrics, history = main()
+    all_results = main()

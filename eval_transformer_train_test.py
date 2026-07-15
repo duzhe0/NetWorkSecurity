@@ -85,7 +85,8 @@ def load_and_preprocess(base_dir, class_names):
     df_test['label_binary'] = df_test['label'].apply(lambda x: 0 if x == 'normal' else 1)
     if class_names:
         label_to_idx = {name: i for i, name in enumerate(class_names)}
-        df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(-1).astype(int)
+        unknown_idx = len(class_names) - 1
+        df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(unknown_idx).astype(int)
     else:
         df_test['label_multiclass_encoded'] = 0
 
@@ -129,7 +130,7 @@ def print_eval_results(y_true, y_pred, y_prob, num_classes, class_names):
     y_prob_v = y_prob[valid_mask]
     n_dropped = int((~valid_mask).sum())
     if n_dropped > 0:
-        print(f"[过滤] 剔除 {n_dropped} 个未知标签样本")
+        print(f"[过滤] 剔除 {n_dropped} 个非法标签样本（不应出现）")
 
     print("\n" + "=" * 70)
     print("评估结果（多分类，weighted 平均）")

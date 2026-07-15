@@ -5,6 +5,7 @@ from sklearn.model_selection import train_test_split
 import joblib
 import argparse
 import warnings
+import os
 warnings.filterwarnings('ignore')
 
 # ============================================================
@@ -102,7 +103,7 @@ def explore_data(df):
 
 
 def preprocess_labels(df):
-    """标签处理：二分类 + 5大分类 + 23细分类"""
+    """标签处理：二分类 + 5大分类 + 24细分类"""
     print("\n" + "=" * 60)
     print("二、标签预处理")
     print("=" * 60)
@@ -128,21 +129,46 @@ def preprocess_labels(df):
     for i, class_name in enumerate(le_category.classes_):
         print(f"  {i} -> {class_name}")
 
-    # 4. 23 细分类标签：normal + 22 种具体攻击类型
+    # 4. 24 细分类标签：normal + 22 种具体攻击 + unknown_attack
     df['label_multiclass'] = df['label']  # 原始具体类型
-    le_multiclass = LabelEncoder()
-    df['label_multiclass_encoded'] = le_multiclass.fit_transform(df['label_multiclass'])
 
-    print("\n【23 分类标签分布】")
+    # 从 .txt 文件读取标准类别列表（含 perl 和 unknown_attack），按文件顺序编码
+    class_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'Train', 'encoder_multiclass_23_classes.txt')
+    if os.path.exists(class_file):
+        with open(class_file, 'r') as f:
+            canonical_classes = [line.strip() for line in f if line.strip()]
+        # 未知类型（不在文件中的）统一映射到最后一类（unknown_attack）
+        unknown_idx = len(canonical_classes) - 1
+        label_to_idx = {name: i for i, name in enumerate(canonical_classes)}
+        df['label_multiclass_encoded'] = df['label_multiclass'].map(label_to_idx).fillna(unknown_idx).astype(int)
+        print(f"\n[标签映射] 从 {class_file} 加载 {len(canonical_classes)} 类标准映射")
+    else:
+        le_multiclass = LabelEncoder()
+        df['label_multiclass_encoded'] = le_multiclass.fit_transform(df['label_multiclass'])
+        canonical_classes = list(le_multiclass.classes_)
+
+    print("\n【24 分类标签分布（训练集实际出现 23 类）】")
     mc_counts = df['label_multiclass'].value_counts()
-    print(f"23 分类总类别数: {len(le_multiclass.classes_)}")
-    print(mc_counts)
+    actual_labels = sorted(df['label_multiclass_encoded'].unique())
+    print(f"总类别数（含 unknown_attack）: {len(canonical_classes)}, 实际出现: {len(actual_labels)}")
+    for idx in actual_labels:
+        name = canonical_classes[idx] if idx < len(canonical_classes) else f"index_{idx}"
+        count = (df['label_multiclass_encoded'] == idx).sum()
+        print(f"  {idx}: {name} = {count}")
+    if len(actual_labels) < len(canonical_classes):
+        missing = set(range(len(canonical_classes))) - set(actual_labels)
+        print(f"训练集中缺失的类别索引: {sorted(missing)}")
+        for m in sorted(missing):
+            name = canonical_classes[m] if m < len(canonical_classes) else f"index_{m}"
+            print(f"  {m}: {name} (0 样本)")
 
-    print("\n【23 分类标签编码映射】")
-    for i, class_name in enumerate(le_multiclass.classes_):
-        print(f"  {i} -> {class_name}")
+    print("\n【24 分类标签标准映射】")
+    for i, class_name in enumerate(canonical_classes):
+        has_sample = "✓" if i in actual_labels else "✗"
+        print(f"  {i} -> {class_name} {has_sample}")
 
-    return df, le_category, le_multiclass
+    return df, le_category, canonical_classes
 
 
 def split_data(df, test_size=0.2, val_size=0.1, random_state=42):
@@ -151,13 +177,13 @@ def split_data(df, test_size=0.2, val_size=0.1, random_state=42):
     切分在预处理（标准化）之前完成，避免数据泄漏
 
     划分比例：训练集70% / 验证集10% / 测试集20%
-    使用 23 分类标签做分层采样；当某些类样本过少时，退化为 random split
+    使用 24 分类标签做分层采样；当某些类样本过少时，退化为 random split
     """
     print("\n" + "=" * 60)
     print("三、数据集划分（先切分，后标准化，防止数据泄漏）")
     print("=" * 60)
 
-    # 使用 23 分类标签做分层，保证稀有类别在三个集合中都有代表
+    # 使用 24 分类标签做分层，保证稀有类别在三个集合中都有代表
     y = df['label_multiclass_encoded'].values
 
     # 检查每个类别的样本数：若少于 2（split 后会 < 1），则改用 random split
@@ -166,7 +192,7 @@ def split_data(df, test_size=0.2, val_size=0.1, random_state=42):
     use_stratify = len(too_few_classes) == 0
 
     if not use_stratify:
-        print(f"  ⚠️ 以下 {len(too_few_classes)} 个类别样本数 < 2，无法使用 stratified split：")
+        print(f"  [WARNING] 以下 {len(too_few_classes)} 个类别样本数 < 2，无法使用 stratified split：")
         for c in too_few_classes:
             class_name = df.loc[df['label_multiclass_encoded'] == c, 'label_multiclass'].iloc[0]
             print(f"      - {class_name} (encoded={c}, count={class_counts[c]})")
@@ -204,8 +230,8 @@ def split_data(df, test_size=0.2, val_size=0.1, random_state=42):
     print(f"验证集: {len(df_val)} 样本 ({len(df_val)/len(df)*100:.1f}%)")
     print(f"测试集: {len(df_test)} 样本 ({len(df_test)/len(df)*100:.1f}%)")
 
-    # 检查各集标签分布（以 23 分类为例）
-    print("\n【23 分类在三个集合的样本数】")
+    # 检查各集标签分布（以 24 分类为例）
+    print("\n【24 分类在三个集合的样本数】")
     for name, subset in [('训练集', df_train), ('验证集', df_val), ('测试集', df_test)]:
         dist = subset['label_multiclass'].value_counts()
         print(f"  {name}: 类别数={dist.size}, 正常={int(dist.get('normal', 0))}, 总攻击={len(subset) - int(dist.get('normal', 0))}")
@@ -221,6 +247,17 @@ def encode_and_scale(df_train, df_val, df_test):
     print("\n" + "=" * 60)
     print("四、特征编码与标准化（仅训练集fit，验证/测试集只transform）")
     print("=" * 60)
+
+    # ========== 特征剔除：移除无信息列 ==========
+    DROP_COLS = ['num_outbound_cmds', 'is_host_login', 'urgent', 'su_attempted']
+    for col in DROP_COLS:
+        if col in df_train.columns:
+            df_train = df_train.drop(columns=[col])
+            df_val = df_val.drop(columns=[col])
+            df_test = df_test.drop(columns=[col])
+    print(f"\n[特征剔除] 已移除 {len(DROP_COLS)} 列: {DROP_COLS}")
+    print(f"  移除原因: 常数或近似常数（信息量≈0）")
+    print(f"  移除后数值特征: {len([c for c in NUMERIC_FEATURES if c not in DROP_COLS])} 列")
 
     # ---------- One-Hot 编码 ----------
     print("\n[One-Hot 编码] 使用 sklearn OneHotEncoder（可持久化，对新数据一致）")
@@ -279,7 +316,7 @@ def encode_and_scale(df_train, df_val, df_test):
     return df_train_scaled, df_val_scaled, df_test_scaled, ohe, scaler, ohe_feature_names
 
 
-def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
+def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     """主函数：完整的数据预处理流程（防数据泄漏版本）
 
     Args:
@@ -300,8 +337,8 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     # Step 2: 数据探索
     df = explore_data(df)
 
-    # Step 3: 标签处理（二分类 + 5大分类 + 23细分类）
-    df, le_category, le_multiclass = preprocess_labels(df)
+    # Step 3: 标签处理（二分类 + 5大分类 + 24细分类）
+    df, le_category, canonical_classes = preprocess_labels(df)
 
     # Step 4: 先切分数据集（在标准化之前！）
     df_train, df_val, df_test = split_data(df, test_size=0.2, val_size=0.1)
@@ -331,7 +368,7 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     print(f"标签列:")
     print(f"  - label_binary: 二分类 (normal/attack)")
     print(f"  - label_category_encoded: 5大分类 (normal/dos/probe/r2l/u2r)")
-    print(f"  - label_multiclass_encoded: 23细分类 (normal + 22种具体攻击)")
+    print(f"  - label_multiclass_encoded: 24细分类 (normal + 22种攻击 + unknown_attack)")
     print(f"\n关键原则:")
     print(f"  - StandardScaler 仅在训练集上 fit，验证/测试集只 transform")
     print(f"  - OneHotEncoder 仅在训练集上 fit，验证/测试集只 transform")
@@ -350,13 +387,9 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
     joblib.dump(scaler, f"{output_dir}/scaler_standard.pkl")
     joblib.dump({'feature_cols': feature_cols, 'ohe_feature_names': list(ohe_feature_names)},
                 f"{output_dir}/preprocessing_metadata.pkl")
-    # 保存 23 分类标签编码器（供模型推理时将预测索引映射回具体类型）
-    joblib.dump(le_multiclass, f"{output_dir}/encoder_multiclass_23.pkl")
-    # 额外保存一份纯类别列表（跨 sklearn 版本兼容）
-    class_list_path = f"{output_dir}/encoder_multiclass_23_classes.txt"
-    with open(class_list_path, 'w') as f:
-        for c in le_multiclass.classes_:
-            f.write(c + '\n')
+    # 保存 24 分类标签列表（供模型推理时将预测索引映射回具体类型）
+    joblib.dump(canonical_classes, f"{output_dir}/encoder_multiclass_23.pkl")
+    # .txt 文件已在项目根目录下维护，此处不再覆盖
     # 保存 5 大类标签编码器（normal/dos/probe/r2l/u2r，供 5 分类任务推理映射）
     joblib.dump(le_category, f"{output_dir}/encoder_category_5.pkl")
     class_list_path_5 = f"{output_dir}/encoder_category_5_classes.txt"
@@ -383,9 +416,9 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='KDD Cup 99 数据预处理')
-    parser.add_argument('--dataset', type=str, default='20percent',
+    parser.add_argument('--dataset', type=str, default='full',
                         choices=['full', '20percent'],
-                        help='使用的数据集: full(完整训练集125k) 或 20percent(20%训练集25k)，默认 20percent')
+                        help='使用的数据集: full(完整训练集125k) 或 20percent(20%训练集25k)，默认 full')
     parser.add_argument('--data_dir', type=str, default='../Train',
                         help='数据目录路径，默认 ../Train')
     args = parser.parse_args()
