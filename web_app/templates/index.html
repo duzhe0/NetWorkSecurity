@@ -379,6 +379,68 @@
                             </select>
                             <div class="form-text text-muted"><i class="fas fa-info-circle"></i> XGBoost 使用自带损失函数，不受此选项影响</div>
                         </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header" style="cursor: pointer;" onclick="toggleParams()">
+                                <div class="row align-items-center">
+                                    <div class="col-10">
+                                        <h6><i class="fas fa-sliders-h"></i> 训练参数设置（调参）</h6>
+                                    </div>
+                                    <div class="col-2 text-right">
+                                        <i id="params-toggle-icon" class="fas fa-chevron-down"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="params-panel" class="card-body" style="display: none;">
+                                <h6 class="text-primary mb-3"><i class="fas fa-network-wired"></i> 通用参数（DNN / CNN / Transformer）</h6>
+                                <div class="row">
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">训练轮数 (Epochs)</label>
+                                        <input type="number" id="param-epochs" class="form-control" value="50" min="1" max="500" step="1">
+                                        <div class="form-text text-muted">默认 50</div>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">批次大小 (Batch Size)</label>
+                                        <input type="number" id="param-batch-size" class="form-control" value="64" min="8" max="1024" step="8">
+                                        <div class="form-text text-muted">默认 64</div>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">学习率 (Learning Rate)</label>
+                                        <input type="number" id="param-lr" class="form-control" value="0.001" min="0.00001" max="1" step="0.0001">
+                                        <div class="form-text text-muted">默认 0.001</div>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">Dropout 比率</label>
+                                        <input type="number" id="param-dropout" class="form-control" value="0.3" min="0" max="0.9" step="0.05">
+                                        <div class="form-text text-muted">默认 0.3</div>
+                                    </div>
+                                </div>
+                                <hr>
+                                <h6 class="text-success mb-3"><i class="fas fa-tree"></i> XGBoost 特有参数</h6>
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">树的数量 (n_estimators)</label>
+                                        <input type="number" id="param-xgb-n-estimators" class="form-control" value="200" min="10" max="2000" step="10">
+                                        <div class="form-text text-muted">默认 200</div>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">树的最大深度 (max_depth)</label>
+                                        <input type="number" id="param-xgb-max-depth" class="form-control" value="8" min="1" max="20" step="1">
+                                        <div class="form-text text-muted">默认 8</div>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">学习率 (learning_rate)</label>
+                                        <input type="number" id="param-xgb-lr" class="form-control" value="0.1" min="0.001" max="1" step="0.01">
+                                        <div class="form-text text-muted">默认 0.1</div>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="resetParams()">
+                                        <i class="fas fa-undo"></i> 恢复默认值
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         
                         <div class="row">
                             <div class="col-md-4">
@@ -1003,12 +1065,47 @@
                 });
         }
 
+        function toggleParams() {
+            const panel = document.getElementById('params-panel');
+            const icon = document.getElementById('params-toggle-icon');
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                icon.className = 'fas fa-chevron-up';
+            } else {
+                panel.style.display = 'none';
+                icon.className = 'fas fa-chevron-down';
+            }
+        }
+
+        function resetParams() {
+            document.getElementById('param-epochs').value = 50;
+            document.getElementById('param-batch-size').value = 64;
+            document.getElementById('param-lr').value = 0.001;
+            document.getElementById('param-dropout').value = 0.3;
+            document.getElementById('param-xgb-n-estimators').value = 200;
+            document.getElementById('param-xgb-max-depth').value = 8;
+            document.getElementById('param-xgb-lr').value = 0.1;
+        }
+
+        function getTrainingParams() {
+            return {
+                epochs: parseInt(document.getElementById('param-epochs')?.value || 50),
+                batch_size: parseInt(document.getElementById('param-batch-size')?.value || 64),
+                learning_rate: parseFloat(document.getElementById('param-lr')?.value || 0.001),
+                dropout_rate: parseFloat(document.getElementById('param-dropout')?.value || 0.3),
+                xgb_n_estimators: parseInt(document.getElementById('param-xgb-n-estimators')?.value || 200),
+                xgb_max_depth: parseInt(document.getElementById('param-xgb-max-depth')?.value || 8),
+                xgb_learning_rate: parseFloat(document.getElementById('param-xgb-lr')?.value || 0.1)
+            };
+        }
+
         function trainModel(modelName) {
             const btn = document.getElementById(`btn-${modelName}`);
             const status = document.getElementById(`status-${modelName}`);
             const logArea = document.getElementById(`log-${modelName}`);
             const granularity = document.getElementById('train-granularity')?.value || '23';
             const lossFn = document.getElementById('loss-function')?.value || 'CrossEntropy';
+            const params = getTrainingParams();
             
             btn.disabled = true;
             status.className = 'status-badge status-running';
@@ -1018,7 +1115,7 @@
             fetch('/train/model', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model_name: modelName, granularity: granularity, loss_fn: lossFn })
+                body: JSON.stringify({ model_name: modelName, granularity: granularity, loss_fn: lossFn, ...params })
             })
             .then(response => response.json())
             .then(data => {

@@ -397,6 +397,18 @@ def train_model():
     model_name = request.json.get('model_name')
     granularity = request.json.get('granularity', '23')
     loss_fn_name = request.json.get('loss_fn', 'CrossEntropy')
+    
+    # 通用训练参数（带默认值）
+    epochs = int(request.json.get('epochs', 50))
+    batch_size = int(request.json.get('batch_size', 64))
+    learning_rate = float(request.json.get('learning_rate', 0.001))
+    dropout_rate = float(request.json.get('dropout_rate', 0.3))
+    
+    # XGBoost 特有参数
+    xgb_n_estimators = int(request.json.get('xgb_n_estimators', 200))
+    xgb_max_depth = int(request.json.get('xgb_max_depth', 8))
+    xgb_learning_rate = float(request.json.get('xgb_learning_rate', 0.1))
+    
     if granularity not in ('5', '23'):
         return jsonify({'status': 'error', 'message': '无效的分类粒度，仅支持 5 或 23'})
     task_key = f'{model_name}_{granularity}'
@@ -513,9 +525,9 @@ def train_model():
                 update_progress(task_key, 12)
 
                 params = {
-                    'n_estimators': 200,
-                    'max_depth': 8,
-                    'learning_rate': 0.1,
+                    'n_estimators': xgb_n_estimators,
+                    'max_depth': xgb_max_depth,
+                    'learning_rate': xgb_learning_rate,
                     'objective': 'multi:softprob',
                     'num_class': num_classes,
                     'eval_metric': 'mlogloss',
@@ -525,7 +537,7 @@ def train_model():
                     'tree_method': 'hist'
                 }
 
-                add_message(task_key,f'XGBoost ({granularity} 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
+                add_message(task_key,f'XGBoost ({granularity} 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, lr={params["learning_rate"]}, num_class={params["num_class"]}')
                 add_message(task_key,'开始训练（eval_set 使用验证集，非测试集）...')
                 update_progress(task_key, 20)
 
@@ -547,7 +559,7 @@ def train_model():
                 add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
-                model = DNNMultiClass(input_dim, num_classes).to(device)
+                model = DNNMultiClass(input_dim, num_classes, dropout_rate=dropout_rate).to(device)
 
                 # 计算类别权重（用于加权损失函数）
                 from sklearn.utils.class_weight import compute_class_weight
@@ -556,7 +568,7 @@ def train_model():
 
                 # 使用选择的损失函数
                 criterion = get_loss_fn(loss_fn_name, class_weights_tensor, device)
-                optimizer = optim.Adam(model.parameters(), lr=0.001)
+                optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
                 X_train_tensor = torch.FloatTensor(X_train).to(device)
                 y_train_tensor = torch.LongTensor(y_train).to(device)
@@ -564,14 +576,14 @@ def train_model():
                 y_val_tensor = torch.LongTensor(y_val).to(device)
 
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-                train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-                add_message(task_key,f'【DNN 多分类】输出维度={num_classes}, loss={loss_fn_name}')
+                add_message(task_key,f'【DNN 多分类】输出维度={num_classes}, epochs={epochs}, batch_size={batch_size}, lr={learning_rate}, dropout={dropout_rate}, loss={loss_fn_name}')
                 add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
                 update_progress(task_key, 12)
                 start_time = time.time()
                 
-                for epoch in range(50):
+                for epoch in range(epochs):
                     model.train()
                     epoch_loss = 0
                     for batch_X, batch_y in train_loader:
@@ -582,14 +594,14 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
                     
-                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / epochs * 76))
 
-                    if (epoch + 1) % 10 == 0:
+                    if (epoch + 1) % max(1, epochs // 5) == 0:
                         # 在验证集上计算 loss（非测试集）
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/{epochs}] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
                 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -600,13 +612,13 @@ def train_model():
                 add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
-                model = CNN1DMultiClass(input_dim, num_classes).to(device)
+                model = CNN1DMultiClass(input_dim, num_classes, dropout_rate=dropout_rate).to(device)
 
                 from sklearn.utils.class_weight import compute_class_weight
                 class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
                 class_weights_tensor = torch.FloatTensor(class_weights).to(device)
                 criterion = get_loss_fn(loss_fn_name, class_weights_tensor, device)
-                optimizer = optim.Adam(model.parameters(), lr=0.001)
+                optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
                 X_train_tensor = torch.FloatTensor(X_train).to(device)
                 y_train_tensor = torch.LongTensor(y_train).to(device)
@@ -614,14 +626,14 @@ def train_model():
                 y_val_tensor = torch.LongTensor(y_val).to(device)
 
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-                train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-                add_message(task_key,f'【1D-CNN 多分类】输入序列长度={input_dim}, 输出维度={num_classes}, loss={loss_fn_name}')
+                add_message(task_key,f'【1D-CNN 多分类】输入序列长度={input_dim}, 输出维度={num_classes}, epochs={epochs}, batch_size={batch_size}, lr={learning_rate}, dropout={dropout_rate}, loss={loss_fn_name}')
                 add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
                 update_progress(task_key, 12)
                 start_time = time.time()
 
-                for epoch in range(50):
+                for epoch in range(epochs):
                     model.train()
                     epoch_loss = 0
                     for batch_X, batch_y in train_loader:
@@ -632,13 +644,13 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
-                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / epochs * 76))
 
-                    if (epoch + 1) % 10 == 0:
+                    if (epoch + 1) % max(1, epochs // 5) == 0:
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/{epochs}] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -649,13 +661,13 @@ def train_model():
                 add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
-                model = TransformerMultiClass(input_dim, num_classes).to(device)
+                model = TransformerMultiClass(input_dim, num_classes, dropout_rate=dropout_rate).to(device)
 
                 from sklearn.utils.class_weight import compute_class_weight
                 class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
                 class_weights_tensor = torch.FloatTensor(class_weights).to(device)
                 criterion = get_loss_fn(loss_fn_name, class_weights_tensor, device)
-                optimizer = optim.Adam(model.parameters(), lr=0.001)
+                optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
                 X_train_tensor = torch.FloatTensor(X_train).to(device)
                 y_train_tensor = torch.LongTensor(y_train).to(device)
@@ -663,14 +675,14 @@ def train_model():
                 y_val_tensor = torch.LongTensor(y_val).to(device)
 
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-                train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-                add_message(task_key,f'【Transformer 多分类】token数={input_dim}, d_model=64, 输出维度={num_classes}, loss={loss_fn_name}')
+                add_message(task_key,f'【Transformer 多分类】token数={input_dim}, d_model=64, 输出维度={num_classes}, epochs={epochs}, batch_size={batch_size}, lr={learning_rate}, dropout={dropout_rate}, loss={loss_fn_name}')
                 add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
                 update_progress(task_key, 12)
                 start_time = time.time()
 
-                for epoch in range(50):
+                for epoch in range(epochs):
                     model.train()
                     epoch_loss = 0
                     for batch_X, batch_y in train_loader:
@@ -681,13 +693,13 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
-                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / epochs * 76))
 
-                    if (epoch + 1) % 10 == 0:
+                    if (epoch + 1) % max(1, epochs // 5) == 0:
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/{epochs}] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
