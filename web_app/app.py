@@ -126,8 +126,9 @@ training_progress = {k: 0 for k in _STATUS_KEYS}
 def add_message(task, msg):
     if task in training_messages:
         training_messages[task].append(msg)
-        if len(training_messages[task]) > 100:
-            training_messages[task] = training_messages[task][-50:]
+        # 上限 500 条，超过则保留最近 300 条（每轮训练约 95 行，留足余量）
+        if len(training_messages[task]) > 500:
+            training_messages[task] = training_messages[task][-300:]
 
 def update_progress(task, value):
     if task in training_progress:
@@ -499,7 +500,7 @@ def train_model():
                     
                     update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
-                    if (epoch + 1) % 5 == 0:
+                    if True:  # 每个 epoch 都输出
                         # 在验证集上计算 loss 和准确率（非测试集）
                         model.eval()
                         with torch.no_grad():
@@ -547,7 +548,7 @@ def train_model():
 
                     update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
-                    if (epoch + 1) % 5 == 0:
+                    if True:  # 每个 epoch 都输出
                         model.eval()
                         with torch.no_grad():
                             val_logits = model(X_val_tensor)
@@ -594,7 +595,7 @@ def train_model():
 
                     update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
 
-                    if (epoch + 1) % 5 == 0:
+                    if True:  # 每个 epoch 都输出
                         model.eval()
                         with torch.no_grad():
                             val_logits = model(X_val_tensor)
