@@ -3,1140 +3,1450 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NSL-KDD 入侵检测系统</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>KDD Cup 99 网络入侵检测系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background-color: #f8f9fa;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        .sidebar {
             min-height: 100vh;
-            color: #fff;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            backdrop-filter: blur(10px);
-            margin-bottom: 1rem;
-        }
-        .card-header {
-            background: rgba(255, 255, 255, 0.05);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            font-weight: 600;
-            color: #fff;
-        }
-        .tab-content { min-height: 500px; }
-        .nav-tabs .nav-link {
-            color: rgba(255, 255, 255, 0.7);
-            border: none;
-            border-radius: 8px 8px 0 0;
-            padding: 12px 20px;
+        .sidebar .nav-link {
+            color: white;
+            border-radius: 8px;
+            margin: 5px 10px;
             transition: all 0.3s;
         }
-        .nav-tabs .nav-link.active {
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            background: rgba(255,255,255,0.2);
         }
-        .nav-tabs .nav-link:hover { color: #fff; }
+        .card {
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: none;
         }
         .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+            opacity: 0.9;
         }
-        .btn-danger {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        .btn-orange {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
             border: none;
+            color: white;
         }
-        .btn-success {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        .btn-orange:hover {
+            opacity: 0.9;
+            color: white;
+        }
+        .btn-teal {
+            background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
             border: none;
+            color: white;
         }
-        .form-control, .form-select {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #fff;
-        }
-        .form-control:focus, .form-select:focus {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: #667eea;
-            box-shadow: none;
-            color: #fff;
-        }
-        .progress-bar {
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        .btn-teal:hover {
+            opacity: 0.9;
+            color: white;
         }
         .status-badge {
+            font-size: 0.85rem;
             padding: 4px 12px;
             border-radius: 20px;
-            font-size: 12px;
+        }
+        .status-running {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status-completed {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status-idle {
+            background-color: #e2e3e5;
+            color: #383d41;
+        }
+        .progress-track {
+            width: 100%;
+            height: 18px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 8px 0;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4e73df, #224abe);
+            border-radius: 10px;
+            transition: width 0.4s ease;
+        }
+        .progress-fill.is-test {
+            background: linear-gradient(90deg, #36b9cc, #25859a);
+        }
+        .progress-fill.is-prep {
+            background: linear-gradient(90deg, #f6c23e, #d39e00);
+        }
+        .progress-text {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            color: #212529;
             font-weight: 600;
         }
-        .status-idle { background: #6c757d; }
-        .status-running { background: #17a2b8; animation: pulse 2s infinite; }
-        .status-completed { background: #28a745; }
-        .status-error { background: #dc3545; }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
         .log-area {
-            background: rgba(0, 0, 0, 0.4);
+            background: #f8f9fa;
             border-radius: 8px;
-            padding: 12px;
+            padding: 15px;
             height: 300px;
             overflow-y: auto;
             font-family: 'Consolas', monospace;
-            font-size: 12px;
-            color: #00ff88;
+            font-size: 0.9rem;
+        }
+        .log-item {
+            margin-bottom: 5px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
         }
         .metric-card {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
             text-align: center;
         }
         .metric-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: #667eea;
+            font-size: 1.8rem;
+            font-weight: bold;
         }
         .metric-label {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.6);
-            margin-top: 4px;
-        }
-        .confusion-matrix { overflow-x: auto; font-size: 10px; }
-        .confusion-cell {
-            padding: 4px;
-            text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            min-width: 30px;
-        }
-        .confusion-cell.diagonal { background: rgba(40, 167, 69, 0.3); }
-        .table-dark th, .table-dark td {
-            border-color: rgba(255, 255, 255, 0.1);
-            color: #fff;
+            font-size: 0.9rem;
+            opacity: 0.9;
         }
         .chart-container {
             position: relative;
             height: 300px;
             width: 100%;
         }
-        .step-indicator {
-            display: inline-block;
-            width: 30px;
-            height: 30px;
-            line-height: 30px;
-            text-align: center;
-            border-radius: 50%;
-            background: #667eea;
-            color: white;
-            font-weight: bold;
-            margin-right: 8px;
+        .card-body canvas {
+            max-height: 280px;
+            width: 100% !important;
         }
-        .text-gray-300 { color: rgba(255,255,255,0.8); }
-        .text-gray-400 { color: rgba(255,255,255,0.6); }
-        .text-gray-500 { color: rgba(255,255,255,0.5); }
-        .text-gray-600 { color: rgba(255,255,255,0.4); }
-        .form-check-label { color: rgba(255,255,255,0.9); }
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 20px 15px;
+            text-align: center;
+            min-height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            line-height: 1.2;
+            margin-bottom: 5px;
+        }
+        .metric-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        .confusion-matrix {
+            display: inline-block;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .confusion-cell {
+            padding: 15px 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .confusion-cell.tp { background-color: #d4edda; color: #155724; }
+        .confusion-cell.fn { background-color: #f8d7da; color: #721c24; }
+        .confusion-cell.fp { background-color: #fff3cd; color: #856404; }
+        .confusion-cell.tn { background-color: #d1ecf1; color: #0c5460; }
     </style>
 </head>
 <body>
-    <div class="container-fluid py-4">
-        <div class="card mb-4">
-            <div class="card-body">
-                <div class="row align-items-center">
-                    <div class="col-md-8">
-                        <h1><i class="fas fa-shield-alt"></i> NSL-KDD 入侵检测系统</h1>
-                        <p class="text-gray-400 mt-2 mb-0">基于深度学习的网络入侵检测系统 | 细粒度攻击分类 | 多算法对比 | 类不平衡处理</p>
-                    </div>
-                    <div class="col-md-4 text-end">
-                        <button class="btn btn-danger" onclick="resetSystem()">
-                            <i class="fas fa-refresh"></i> 重置系统
-                        </button>
-                    </div>
+    <div class="container-fluid">
+        <div class="row">
+            <nav class="col-md-2 d-none d-md-block sidebar">
+                <div class="sidebar-sticky pt-3">
+                    <h3 class="text-white text-center mb-4"><i class="fas fa-shield-alt"></i> 入侵检测系统</h3>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#preprocess" onclick="showTab('preprocess')">
+                                <i class="fas fa-database"></i> 数据预处理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#distribution" onclick="showTab('distribution')">
+                                <i class="fas fa-chart-pie"></i> 数据分布
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#training" onclick="showTab('training')">
+                                <i class="fas fa-cogs"></i> 模型训练
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#results" onclick="showTab('results')">
+                                <i class="fas fa-bar-chart"></i> 结果对比
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#testing" onclick="showTab('testing')">
+                                <i class="fas fa-flask"></i> 模型测试
+                            </a>
+                        </li>
+                    </ul>
                 </div>
-            </div>
-        </div>
+            </nav>
 
-        <ul class="nav nav-tabs mb-4" id="mainTabs">
-            <li class="nav-item"><a class="nav-link active" href="#data-tab" data-bs-toggle="tab"><i class="fas fa-database"></i> 1.数据预处理</a></li>
-            <li class="nav-item"><a class="nav-link" href="#train-tab" data-bs-toggle="tab"><i class="fas fa-network-wired"></i> 2.模型训练</a></li>
-            <li class="nav-item"><a class="nav-link" href="#tune-tab" data-bs-toggle="tab"><i class="fas fa-sliders-h"></i> 3.模型优化</a></li>
-            <li class="nav-item"><a class="nav-link" href="#results-tab" data-bs-toggle="tab"><i class="fas fa-chart-line"></i> 4.性能评估</a></li>
-            <li class="nav-item"><a class="nav-link" href="#compare-tab" data-bs-toggle="tab"><i class="fas fa-balance-scale"></i> 算法对比</a></li>
-            <li class="nav-item"><a class="nav-link" href="#predict-tab" data-bs-toggle="tab"><i class="fas fa-magic"></i> 实时预测</a></li>
-        </ul>
-
-        <div class="tab-content">
-            <!-- 1. 数据预处理 -->
-            <div class="tab-pane active" id="data-tab">
-                <div class="row">
-                    <div class="col-md-5">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><span class="step-indicator">1</span>数据预处理配置</h4></div>
+            <main role="main" class="col-md-10 ml-sm-auto px-4">
+                <div class="tab-content" id="main-content">
+                    <div id="tab-preprocess" class="tab-pane fade show active">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-database"></i> 数据预处理</h2>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <div class="row align-items-center">
+                                    <div class="col-md-6">
+                                        <h5>预处理状态</h5>
+                                    </div>
+                                    <div class="col-md-6 text-right">
+                                        <span id="preprocess-status" class="status-badge status-idle">待处理</span>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="card-body">
-                                <div class="mb-3">
-                                    <label class="text-gray-300">分类模式</label>
-                                    <div class="row mt-2">
-                                        <div class="col-md-6">
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="classification_mode" value="fine" checked>
-                                                <label class="form-check-label">细粒度（23种攻击）</label>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>选择训练数据集</strong></label>
+                                            <select id="dataset-select" class="form-select">
+                                                <option value="20percent">20% 训练集（25,192 条，快速实验）</option>
+                                                <option value="full">完整训练集（125,973 条，推荐用于模型测试）</option>
+                                            </select>
+                                            <div class="form-text text-muted">
+                                                <i class="fas fa-info-circle"></i> 
+                                                完整训练集覆盖更多攻击类型，外部测试效果更好
                                             </div>
                                         </div>
-                                        <div class="col-md-6">
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="classification_mode" value="coarse">
-                                                <label class="form-check-label">粗粒度（5大类）</label>
+                                        <button id="btn-preprocess" class="btn btn-primary btn-lg w-100" onclick="startPreprocessing()">
+                                            <i class="fas fa-play"></i> 开始预处理
+                                        </button>
+                                        <button id="btn-reset-preprocess" class="btn btn-secondary btn-lg w-100 mt-2" onclick="resetPreprocessing()" disabled>
+                                            <i class="fas fa-redo"></i> 重置状态
+                                        </button>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <div class="progress-track">
+                                            <div class="progress-fill is-prep" id="prep-progress-fill" style="width:0%"></div>
+                                            <div class="progress-text" id="prep-progress-text">0%</div>
+                                        </div>
+                                        <div class="log-area" id="preprocess-log">
+                                            <div class="text-muted">点击"开始预处理"按钮运行数据预处理流程...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>预处理步骤说明</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-file-csv fa-3x text-primary mb-2"></i>
+                                                <h6 class="card-title">加载数据</h6>
+                                                <p class="card-text text-sm">读取 KDDTrain+_20Percent.txt 数据集</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-search fa-3x text-secondary mb-2"></i>
+                                                <h6 class="card-title">数据探索</h6>
+                                                <p class="card-text text-sm">查看数据基本信息和分布</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-tag fa-3x text-success mb-2"></i>
+                                                <h6 class="card-title">标签处理</h6>
+                                                <p class="card-text text-sm">二分类和多分类标签编码</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-code fa-3x text-danger mb-2"></i>
+                                                <h6 class="card-title">特征编码</h6>
+                                                <p class="card-text text-sm">类别特征 One-Hot 编码</p>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="text-gray-300">数据集</label>
-                                    <select class="form-select" id="dataset_select">
-                                        <option value="train_test" selected>train_test（新上传，22,544条）</option>
-                                        <option value="full">KDDTrain+.txt（全量 125,973条）</option>
-                                        <option value="small">KDDTrain+_20Percent.txt（20%子集）</option>
-                                    </select>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="text-gray-300">测试集比例（训练集=1-测试集）</label>
-                                    <input type="number" class="form-control" id="test_size" value="0.7" min="0.1" max="0.9" step="0.05">
-                                    <small class="text-gray-500">训练集少、测试集多：推荐0.7（训练30%，测试70%）</small>
-                                </div>
-                                <div class="mb-3">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="handle_outliers" checked>
-                                        <label class="form-check-label">异常值处理（IQR方法）</label>
+                                <div class="row mt-3">
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-chart-line fa-3x text-warning mb-2"></i>
+                                                <h6 class="card-title">标准化</h6>
+                                                <p class="card-text text-sm">数值特征 StandardScaler</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <i class="fas fa-save fa-3x text-info mb-2"></i>
+                                                <h6 class="card-title">保存结果</h6>
+                                                <p class="card-text text-sm">保存预处理后的数据</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="mb-3">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="use_feature_selection" checked>
-                                        <label class="form-check-label">特征选择（SelectKBest）</label>
-                                    </div>
-                                    <div class="mt-2">
-                                        <label class="text-gray-300">特征数 K:</label>
-                                        <input type="number" class="form-control" id="n_features" value="30" min="5" max="41">
-                                    </div>
-                                </div>
-                                <div class="mb-3">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="use_pca">
-                                        <label class="form-check-label">PCA降维</label>
-                                    </div>
-                                    <div class="mt-2">
-                                        <label class="text-gray-300">主成分数:</label>
-                                        <input type="number" class="form-control" id="n_components" value="20" min="2" max="41">
-                                    </div>
-                                </div>
-                                <hr class="text-gray-500">
-                                <div class="mb-3">
-                                    <label class="text-gray-300"><i class="fas fa-balance-scale"></i> 类不平衡处理（加分项）</label>
-                                    <select class="form-select" id="balance_method">
-                                        <option value="none">不处理</option>
-                                        <option value="smote">SMOTE 过采样</option>
-                                        <option value="oversample">随机过采样</option>
-                                        <option value="undersample">随机欠采样</option>
-                                    </select>
-                                </div>
-                                <button class="btn btn-primary w-100" onclick="startPreprocessing()" id="btn_preprocess">
-                                    <i class="fas fa-play"></i> 开始预处理
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-distribution" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-chart-pie"></i> 数据分布</h2>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <button class="btn btn-primary" onclick="loadDistribution()">
+                                    <i class="fas fa-refresh"></i> 加载数据分布
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                    <div class="col-md-7">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-terminal"></i> 预处理日志</h4></div>
                             <div class="card-body">
-                                <div class="mb-3">
-                                    <span class="status-badge status-idle" id="preprocess_status">空闲</span>
+                                <div id="distribution-content">
+                                    <div class="text-center text-muted py-10">
+                                        <i class="fas fa-chart-pie fa-5x mb-4"></i>
+                                        <p>请先运行数据预处理，然后点击上方按钮查看数据分布</p>
+                                    </div>
                                 </div>
-                                <div class="log-area" id="preprocess_logs"></div>
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row" id="data_stats_row" style="display:none;">
-                    <div class="col-md-12">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-chart-bar"></i> 数据统计与可视化</h4></div>
-                            <div class="card-body">
-                                <div class="row mb-4">
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="stat_samples">-</div><div class="metric-label">总样本数</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="stat_features">-</div><div class="metric-label">特征数</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="stat_categories">-</div><div class="metric-label">类别数</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="stat_missing">-</div><div class="metric-label">缺失值</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="stat_outliers">-</div><div class="metric-label">异常值</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="stat_train">-</div><div class="metric-label">训练集</div></div></div>
+
+                    <div id="tab-training" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-cogs"></i> 模型训练</h2>
+                        <div class="mb-4">
+                            <label class="form-label"><strong>分类粒度</strong></label>
+                            <select id="train-granularity" class="form-select" style="max-width: 320px;">
+                                <option value="23" selected>23 细分类（normal + 22 种攻击）</option>
+                                <option value="5">5 大类（normal / dos / probe / r2l / u2r）</option>
+                            </select>
+                            <div class="form-text text-muted"><i class="fas fa-info-circle"></i> 切换粒度后点训练按钮；5 类与 23 类模型并存，互不覆盖</div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label"><strong>损失函数（仅深度模型）</strong></label>
+                            <select id="loss-function" class="form-select" style="max-width: 320px;">
+                                <option value="CrossEntropy" selected>CrossEntropyLoss（基准）</option>
+                                <option value="FocalLoss">FocalLoss（处理类别不平衡）</option>
+                                <option value="LabelSmoothing">LabelSmoothing（防止过拟合）</option>
+                                <option value="CrossEntropyWeighted">CrossEntropy+ClassWeight（类别加权）</option>
+                            </select>
+                            <div class="form-text text-muted"><i class="fas fa-info-circle"></i> XGBoost 使用自带损失函数，不受此选项影响</div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>XGBoost</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-xgboost" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">梯度提升树，竞赛中最常用的模型，性能优异</p>
+                                        <button id="btn-xgboost" class="btn btn-primary w-100 mb-2" onclick="trainModel('xgboost')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-xgboost" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-xgboost">0%</div>
+                                        </div>
+                                        <div class="log-area" id="log-xgboost">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
                                 </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>DNN</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-dnn" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">深度神经网络，能学习复杂特征组合</p>
+                                        <button id="btn-dnn" class="btn btn-purple w-100 mb-2" onclick="trainModel('dnn')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-dnn" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-dnn">0%</div>
+                                        </div>
+                                        <div class="log-area" id="log-dnn">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>1D-CNN</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-cnn1d" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">一维卷积神经网络，擅长捕获局部特征模式，适合序列化特征</p>
+                                        <button id="btn-cnn1d" class="btn btn-orange w-100 mb-2" onclick="trainModel('cnn1d')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-cnn1d" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-cnn1d">0%</div>
+                                        </div>
+                                        <div class="log-area" id="log-cnn1d">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <div class="row align-items-center">
+                                            <div class="col-8">
+                                                <h5>Transformer</h5>
+                                            </div>
+                                            <div class="col-4">
+                                                <span id="status-transformer" class="status-badge status-idle">待训练</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-sm text-muted mb-3">基于自注意力机制的模型，能捕获特征间全局依赖关系</p>
+                                        <button id="btn-transformer" class="btn btn-teal w-100 mb-2" onclick="trainModel('transformer')">
+                                            <i class="fas fa-play"></i> 开始训练
+                                        </button>
+                                        <div class="progress-track">
+                                            <div class="progress-fill" id="prog-fill-transformer" style="width:0%"></div>
+                                            <div class="progress-text" id="prog-text-transformer">0%</div>
+                                        </div>
+                                        <div class="log-area" id="log-transformer">
+                                            <div class="text-muted">等待训练...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>模型参数说明</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-3">
+                                        <h6>XGBoost 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>n_estimators: 100</li>
+                                            <li>max_depth: 6</li>
+                                            <li>learning_rate: 0.1</li>
+                                            <li>objective: binary:logistic</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <h6>DNN 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>隐藏层: 256 → 128 → 64</li>
+                                            <li>Dropout: 0.3</li>
+                                            <li>学习率: 0.001</li>
+                                            <li>训练轮数: 50</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <h6>1D-CNN 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>卷积通道: 64 → 128 → 256</li>
+                                            <li>kernel_size: 3</li>
+                                            <li>Dropout: 0.3</li>
+                                            <li>全局平均池化 + 全连接分类</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <h6>Transformer 参数</h6>
+                                        <ul class="text-sm">
+                                            <li>d_model: 64, nhead: 4</li>
+                                            <li>层数: 2, FFN: 128</li>
+                                            <li>Dropout: 0.1</li>
+                                            <li>每特征作为 token，自注意力</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-results" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-bar-chart"></i> 结果对比</h2>
+                        <div class="mb-4">
+                            <label class="form-label"><strong>分类粒度</strong></label>
+                            <select id="comparison-granularity" class="form-select" style="max-width: 320px;" onchange="loadComparison(); loadTestComparison();">
+                                <option value="23" selected>23 细分类</option>
+                                <option value="5">5 大类</option>
+                            </select>
+                            <div class="form-text text-muted"><i class="fas fa-info-circle"></i> 切换粒度查看对应分类任务的对比结果</div>
+                        </div>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <button class="btn btn-primary" onclick="loadComparison()">
+                                    <i class="fas fa-refresh"></i> 加载对比结果
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div id="comparison-content">
+                                    <div class="text-center text-muted py-10">
+                                        <i class="fas fa-bar-chart fa-5x mb-4"></i>
+                                        <p>请先训练模型，然后点击上方按钮查看对比结果</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5>特征重要性分析</h5>
+                            </div>
+                            <div class="card-body">
                                 <div class="row">
                                     <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">类别分布</h5>
-                                        <div class="chart-container"><canvas id="category_dist_chart"></canvas></div>
+                                        <button class="btn btn-primary w-100" onclick="loadFeatureImportance('xgboost')">
+                                            XGBoost 特征重要性
+                                        </button>
                                     </div>
                                     <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">Top 15 重要特征</h5>
-                                        <div class="chart-container"><canvas id="feature_importance_chart"></canvas></div>
+                                        <button class="btn btn-secondary w-100" disabled>
+                                            DNN / 1D-CNN / Transformer（不支持）
+                                        </button>
                                     </div>
+                                </div>
+                                <div id="feature-importance-content" class="mt-4">
+                                    <div class="text-center text-muted">点击上方按钮查看特征重要性</div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <!-- 2. 模型训练 -->
-            <div class="tab-pane" id="train-tab">
-                <div class="row">
-                    <div class="col-md-5">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><span class="step-indicator">2</span>模型训练配置</h4></div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <label class="text-gray-300">算法选择</label>
-                                    <select class="form-select" id="model_type" onchange="toggleModelParams()">
-                                        <option value="improved_dnn">改进型DNN（推荐，深度学习）</option>
-                                        <option value="dnn">基础DNN（深度学习）</option>
-                                        <option value="random_forest">随机森林（集成学习）</option>
-                                        <option value="xgboost">XGBoost（梯度提升树）</option>
-                                    </select>
-                                </div>
-                                <div id="dnn_params">
-                                    <div class="mb-3">
-                                        <label class="text-gray-300">训练轮数 Epochs</label>
-                                        <input type="number" class="form-control" id="epochs" value="30" min="1" max="100">
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="text-gray-300">批次大小 Batch Size</label>
-                                        <input type="number" class="form-control" id="batch_size" value="256" min="16" max="1024">
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="text-gray-300">Dropout 率</label>
-                                        <input type="number" class="form-control" id="dropout_rate" value="0.3" min="0" max="0.9" step="0.1">
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="text-gray-300">学习率 Learning Rate</label>
-                                        <input type="number" class="form-control" id="learning_rate" value="0.001" min="0.0001" max="0.1" step="0.0001">
-                                    </div>
-                                </div>
-                                <div id="tree_params" style="display:none;">
-                                    <div class="mb-3">
-                                        <label class="text-gray-300">树数量 n_estimators</label>
-                                        <input type="number" class="form-control" id="n_estimators" value="100" min="10" max="500">
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="text-gray-300">最大深度 max_depth</label>
-                                        <input type="number" class="form-control" id="max_depth" value="20" min="1" max="50">
-                                    </div>
-                                </div>
-                                <div class="mb-3">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="use_class_weights" checked>
-                                        <label class="form-check-label">使用类别权重（处理不平衡）</label>
-                                    </div>
-                                </div>
-                                <button class="btn btn-primary w-100" onclick="startTraining()" id="btn_train" disabled>
-                                    <i class="fas fa-play"></i> 开始训练
-                                </button>
-                            </div>
+                    <!-- 模型测试页面 -->
+                    <div id="tab-testing" class="tab-pane fade">
+                        <h2 class="mt-4 mb-4"><i class="fas fa-flask"></i> 模型测试</h2>
+                        <div class="mb-4">
+                            <label class="form-label"><strong>分类粒度</strong></label>
+                            <select id="test-granularity" class="form-select" style="max-width: 320px;">
+                                <option value="23" selected>23 细分类（normal + 22 种攻击）</option>
+                                <option value="5">5 大类（normal / dos / probe / r2l / u2r）</option>
+                            </select>
+                            <div class="form-text text-muted"><i class="fas fa-info-circle"></i> 选择与训练时一致的粒度进行测试</div>
                         </div>
-                    </div>
-                    <div class="col-md-7">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-terminal"></i> 训练日志</h4></div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <span class="status-badge status-idle" id="train_status">空闲</span>
-                                </div>
-                                <div class="log-area" id="train_logs"></div>
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5>使用外部测试集评估模型</h5>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 3. 模型优化 -->
-            <div class="tab-pane" id="tune-tab">
-                <div class="row">
-                    <div class="col-md-5">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><span class="step-indicator">3</span>超参数调优</h4></div>
                             <div class="card-body">
-                                <p class="text-gray-400">使用网格搜索（GridSearchCV）+ 3折交叉验证自动寻找最优参数</p>
-                                <div class="mb-3">
-                                    <label class="text-gray-300">选择算法</label>
-                                    <select class="form-select" id="tune_model_type">
-                                        <option value="random_forest">随机森林</option>
-                                        <option value="xgboost">XGBoost</option>
-                                    </select>
-                                </div>
                                 <div class="alert alert-info">
-                                    <small>
-                                    <strong>随机森林参数网格:</strong><br>
-                                    n_estimators: [50, 100, 200]<br>
-                                    max_depth: [10, 20, 30, None]<br>
-                                    min_samples_split: [2, 5, 10]<br>
-                                    <strong>共36种组合</strong>
-                                    </small>
+                                    <i class="fas fa-info-circle"></i> 
+                                    使用 <strong>train_test</strong> 文件作为外部测试集，评估模型在真实新数据上的泛化能力。
+                                    测试集独立于训练过程，结果更加客观。
                                 </div>
-                                <button class="btn btn-primary w-100" onclick="startTuning()" id="btn_tune" disabled>
-                                    <i class="fas fa-sliders-h"></i> 开始调优
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-7">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-terminal"></i> 调优日志</h4></div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <span class="status-badge status-idle" id="tune_status">空闲</span>
-                                </div>
-                                <div class="log-area" id="tune_logs"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="row" id="tune_results_row" style="display:none;">
-                    <div class="col-md-12">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-trophy"></i> 调优结果</h4></div>
-                            <div class="card-body">
-                                <div class="row mb-4">
-                                    <div class="col-md-4"><div class="metric-card"><div class="metric-value" id="tune_best_score">-</div><div class="metric-label">最佳F1分数</div></div></div>
-                                    <div class="col-md-4"><div class="metric-card"><div class="metric-value" id="tune_time">-</div><div class="metric-label">调优耗时(秒)</div></div></div>
-                                    <div class="col-md-4"><div class="metric-card"><div class="metric-value" id="tune_combinations">-</div><div class="metric-label">参数组合数</div></div></div>
-                                </div>
-                                <h5 class="text-gray-300 mb-3">最佳参数</h5>
-                                <pre class="bg-dark p-3 rounded" id="tune_best_params"></pre>
-                                <h5 class="text-gray-300 mb-3 mt-4">Top 10 参数组合</h5>
-                                <div class="table-responsive">
-                                    <table class="table table-dark table-hover" id="tune_top_table">
-                                        <thead><tr><th>排名</th><th>F1分数</th><th>标准差</th><th>参数</th></tr></thead>
-                                        <tbody></tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 4. 性能评估 -->
-            <div class="tab-pane" id="results-tab">
-                <div class="row">
-                    <div class="col-md-12">
-                        <div class="card" id="val_results_card" style="display:none;">
-                            <div class="card-header"><h4 class="mb-0"><span class="step-indicator">4</span>验证集性能评估</h4></div>
-                            <div class="card-body">
-                                <div class="row mb-4">
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="val_accuracy">-</div><div class="metric-label">准确率</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="val_precision">-</div><div class="metric-label">精确率(Macro)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="val_recall">-</div><div class="metric-label">召回率(Macro)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="val_f1">-</div><div class="metric-label">F1(Macro)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="val_f1_w">-</div><div class="metric-label">F1(Weighted)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="val_time">-</div><div class="metric-label">训练耗时(s)</div></div></div>
-                                </div>
-                                <div class="row mb-4">
-                                    <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">训练曲线</h5>
-                                        <div class="chart-container"><canvas id="training_history_chart"></canvas></div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">ROC曲线</h5>
-                                        <div class="chart-container"><canvas id="val_roc_chart"></canvas></div>
-                                    </div>
-                                </div>
-                                <div class="row mb-4">
-                                    <div class="col-md-12">
-                                        <h5 class="text-gray-300 mb-3">混淆矩阵</h5>
-                                        <div class="confusion-matrix" id="val_confusion_matrix"></div>
-                                    </div>
-                                </div>
+                                
                                 <div class="row">
-                                    <div class="col-md-12">
-                                        <h5 class="text-gray-300 mb-3">各类别详细指标</h5>
-                                        <div class="table-responsive">
-                                            <table class="table table-dark table-hover" id="val_per_class_table">
-                                                <thead><tr><th>类别</th><th>精确率</th><th>召回率</th><th>F1分数</th><th>样本数</th></tr></thead>
-                                                <tbody></tbody>
-                                            </table>
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>XGBoost</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-xgboost" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-primary w-100 mb-2" onclick="testModel('xgboost')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-xgboost" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-xgboost">0%</div>
+                                                </div>
+                                                <div class="log-area" id="test-log-xgboost" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>DNN</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-dnn" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-purple w-100 mb-2" onclick="testModel('dnn')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-dnn" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-dnn">0%</div>
+                                                </div>
+                                                <div class="log-area" id="test-log-dnn" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>1D-CNN</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-cnn1d" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-orange w-100 mb-2" onclick="testModel('cnn1d')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-cnn1d" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-cnn1d">0%</div>
+                                                </div>
+                                                <div class="log-area" id="test-log-cnn1d" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="row align-items-center">
+                                                    <div class="col-8"><h6>Transformer</h6></div>
+                                                    <div class="col-4">
+                                                        <span id="test-status-transformer" class="status-badge status-idle">待测试</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <button class="btn btn-teal w-100 mb-2" onclick="testModel('transformer')">
+                                                    <i class="fas fa-play"></i> 开始测试
+                                                </button>
+                                                <div class="progress-track">
+                                                    <div class="progress-fill is-test" id="tprog-fill-transformer" style="width:0%"></div>
+                                                    <div class="progress-text" id="tprog-text-transformer">0%</div>
+                                                </div>
+                                                <div class="log-area" id="test-log-transformer" style="height:200px">
+                                                    <div class="text-muted">等待测试...</div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="card" id="test_results_card" style="display:none;">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-flask"></i> NSL-KDD 测试集评估</h4></div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <button class="btn btn-success" onclick="startTesting()" id="btn_test" disabled>
-                                        <i class="fas fa-play"></i> 开始测试集评估
-                                    </button>
-                                    <span class="status-badge status-idle ms-3" id="test_status">空闲</span>
-                                </div>
-                                <div class="log-area mb-4" id="test_logs"></div>
-                                <div class="row mb-4" id="test_metrics_row" style="display:none;">
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="test_accuracy">-</div><div class="metric-label">准确率</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="test_precision">-</div><div class="metric-label">精确率(Macro)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="test_recall">-</div><div class="metric-label">召回率(Macro)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="test_f1">-</div><div class="metric-label">F1(Macro)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="test_f1_w">-</div><div class="metric-label">F1(Weighted)</div></div></div>
-                                    <div class="col-md-2"><div class="metric-card"><div class="metric-value" id="test_count">-</div><div class="metric-label">测试样本数</div></div></div>
-                                </div>
-                                <div class="row mb-4" id="test_charts_row" style="display:none;">
-                                    <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">测试集ROC曲线</h5>
-                                        <div class="chart-container"><canvas id="test_roc_chart"></canvas></div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">测试集混淆矩阵</h5>
-                                        <div class="confusion-matrix" id="test_confusion_matrix"></div>
-                                    </div>
-                                </div>
-                                <div class="row" id="test_table_row" style="display:none;">
-                                    <div class="col-md-12">
-                                        <h5 class="text-gray-300 mb-3">测试集各类别指标</h5>
-                                        <div class="table-responsive">
-                                            <table class="table table-dark table-hover" id="test_per_class_table">
-                                                <thead><tr><th>类别</th><th>精确率</th><th>召回率</th><th>F1分数</th><th>样本数</th></tr></thead>
-                                                <tbody></tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="card" id="no_results_card">
-                            <div class="card-body text-center py-5">
-                                <i class="fas fa-chart-line fa-5x text-gray-600 mb-4"></i>
-                                <h3 class="text-gray-400">暂无结果</h3>
-                                <p class="text-gray-500 mt-2">请先完成数据预处理和模型训练</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 算法对比 -->
-            <div class="tab-pane" id="compare-tab">
-                <div class="row">
-                    <div class="col-md-5">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-balance-scale"></i> 多算法对比（加分项）</h4></div>
-                            <div class="card-body">
-                                <p class="text-gray-400">同时训练多种算法并对比性能</p>
-                                <div class="mb-3">
-                                    <label class="text-gray-300">选择对比算法</label>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="cmp_improved_dnn" checked>
-                                        <label class="form-check-label">改进型DNN（深度学习）</label>
-                                    </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="cmp_random_forest" checked>
-                                        <label class="form-check-label">随机森林</label>
-                                    </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="cmp_xgboost" checked>
-                                        <label class="form-check-label">XGBoost</label>
-                                    </div>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="text-gray-300">DNN Epochs（对比用）</label>
-                                    <input type="number" class="form-control" id="cmp_epochs" value="20" min="5" max="50">
-                                </div>
-                                <button class="btn btn-primary w-100" onclick="startComparison()" id="btn_compare" disabled>
-                                    <i class="fas fa-play"></i> 开始对比
+                        
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <button class="btn btn-primary" onclick="loadTestComparison()">
+                                    <i class="fas fa-refresh"></i> 加载测试结果对比
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                    <div class="col-md-7">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-terminal"></i> 对比日志</h4></div>
                             <div class="card-body">
-                                <div class="mb-3">
-                                    <span class="status-badge status-idle" id="compare_status">空闲</span>
-                                </div>
-                                <div class="log-area" id="compare_logs"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="row" id="compare_results_row" style="display:none;">
-                    <div class="col-md-12">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-trophy"></i> 对比结果</h4></div>
-                            <div class="card-body">
-                                <div class="table-responsive mb-4">
-                                    <table class="table table-dark table-hover" id="compare_table">
-                                        <thead><tr><th>模型</th><th>准确率</th><th>精确率(Macro)</th><th>召回率(Macro)</th><th>F1(Macro)</th><th>F1(Weighted)</th><th>训练时间(s)</th></tr></thead>
-                                        <tbody></tbody>
-                                    </table>
-                                </div>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">准确率对比</h5>
-                                        <div class="chart-container"><canvas id="compare_acc_chart"></canvas></div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h5 class="text-gray-300 mb-3">F1分数对比</h5>
-                                        <div class="chart-container"><canvas id="compare_f1_chart"></canvas></div>
+                                <div id="test-comparison-content">
+                                    <div class="text-center text-muted py-10">
+                                        <i class="fas fa-chart-bar fa-5x mb-4"></i>
+                                        <p>请先测试模型，然后点击上方按钮查看对比结果</p>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
-
-            <!-- 实时预测 -->
-            <div class="tab-pane" id="predict-tab">
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-magic"></i> 输入特征</h4></div>
-                            <div class="card-body">
-                                <p class="text-gray-400">输入41个特征值（逗号分隔）</p>
-                                <textarea class="form-control" id="predict_features" rows="8" placeholder="0,tcp,http,SF,181,5450,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,9,9,1.00,0.00,0.00,0.00,1.00,0.00,0.11,0.00,0.00,0.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00"></textarea>
-                                <button class="btn btn-primary w-100 mt-3" onclick="predict()" id="btn_predict" disabled>
-                                    <i class="fas fa-search"></i> 预测
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card" id="predict_result_card" style="display:none;">
-                            <div class="card-header"><h4 class="mb-0"><i class="fas fa-flag"></i> 预测结果</h4></div>
-                            <div class="card-body">
-                                <div class="mb-4 text-center">
-                                    <div class="display-4 font-weight-bold text-success" id="predict_label">normal</div>
-                                    <div class="text-gray-400 mt-2">预测类别</div>
-                                </div>
-                                <h5 class="text-gray-300 mb-3">各类别概率</h5>
-                                <div id="probability_bars"></div>
-                            </div>
-                        </div>
-                        <div class="card" id="no_model_card">
-                            <div class="card-body text-center py-5">
-                                <i class="fas fa-magic fa-5x text-gray-600 mb-4"></i>
-                                <h3 class="text-gray-400">暂无模型</h3>
-                                <p class="text-gray-500 mt-2">请先完成模型训练</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            </main>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-        let intervals = {preprocessing:null, training:null, testing:null, comparison:null, tuning:null};
-        let lastIdxs = {preprocessing:0, training:0, testing:0, comparison:0, tuning:0};
-        let charts = {};
-
-        function updateStatus(elemId, status) {
-            const badge = document.getElementById(elemId);
-            badge.className = `status-badge status-${status}`;
-            badge.textContent = {idle:'空闲', running:'运行中', completed:'完成', error:'错误'}[status] || status;
+        function showTab(tabId) {
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(pane => {
+                pane.classList.remove('show', 'active');
+            });
+            document.querySelector(`a[href="#${tabId}"]`).classList.add('active');
+            document.getElementById(`tab-${tabId}`).classList.add('show', 'active');
         }
 
-        function appendLog(elemId, msg) {
-            const area = document.getElementById(elemId);
-            area.innerHTML += `<div>${msg}</div>`;
-            area.scrollTop = area.scrollHeight;
+        // 进度条通用更新：fillId 填充条, textId 文本百分比
+        function setProgress(fillId, textId, value) {
+            value = Math.max(0, Math.min(100, Math.round(value)));
+            const fill = document.getElementById(fillId);
+            const text = document.getElementById(textId);
+            if (fill) fill.style.width = value + '%';
+            if (text) text.textContent = value + '%';
         }
 
-        function clearLog(elemId) {
-            document.getElementById(elemId).innerHTML = '';
-        }
-
-        function toggleModelParams() {
-            const modelType = document.getElementById('model_type').value;
-            document.getElementById('dnn_params').style.display = (modelType === 'improved_dnn' || modelType === 'dnn') ? 'block' : 'none';
-            document.getElementById('tree_params').style.display = (modelType === 'random_forest' || modelType === 'xgboost') ? 'block' : 'none';
-        }
-
-        async function fetchDataInfo() {
-            const response = await fetch('/api/data/info');
-            const data = await response.json();
-            if (data.status === 'success') {
-                const info = data.data;
-                if (info.preprocessed) {
-                    document.getElementById('stat_samples').textContent = info.total_samples.toLocaleString();
-                    document.getElementById('stat_features').textContent = info.feature_count;
-                    document.getElementById('stat_categories').textContent = info.category_count;
-                    document.getElementById('stat_missing').textContent = info.preprocess_info.missing_values;
-                    document.getElementById('stat_outliers').textContent = info.preprocess_info.outlier_count;
-                    document.getElementById('stat_train').textContent = info.preprocess_info.train_count.toLocaleString();
-                    document.getElementById('data_stats_row').style.display = 'flex';
-                    document.getElementById('btn_train').disabled = false;
-                    document.getElementById('btn_test').disabled = false;
-                    document.getElementById('btn_predict').disabled = false;
-                    document.getElementById('btn_tune').disabled = false;
-                    document.getElementById('btn_compare').disabled = false;
-
-                    renderCategoryChart(info.category_distribution);
-                    if (info.preprocess_info.feature_importance) {
-                        renderFeatureImportanceChart(info.preprocess_info.feature_importance);
+        function startPreprocessing() {
+            const dataset = document.getElementById('dataset-select').value;
+            document.getElementById('btn-preprocess').disabled = true;
+            document.getElementById('preprocess-status').className = 'status-badge status-running';
+            document.getElementById('preprocess-status').textContent = '处理中';
+            document.getElementById('preprocess-log').innerHTML = '';
+            
+            fetch('/preprocess', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataset: dataset })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        checkPreprocessStatus();
                     }
-                }
-            }
-        }
-
-        function renderCategoryChart(dist) {
-            if (charts.category) charts.category.destroy();
-            const ctx = document.getElementById('category_dist_chart').getContext('2d');
-            charts.category = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: Object.keys(dist),
-                    datasets: [{data: Object.values(dist), backgroundColor: 'rgba(102,126,234,0.6)', borderColor: 'rgba(102,126,234,1)', borderWidth: 1}]
-                },
-                options: {responsive:true, maintainAspectRatio:false, scales:{y:{ticks:{color:'#aaa'}}, x:{ticks:{color:'#aaa', maxRotation:45}}}, plugins:{legend:{display:false}}}
-            });
-        }
-
-        function renderFeatureImportanceChart(features) {
-            if (charts.feature) charts.feature.destroy();
-            const ctx = document.getElementById('feature_importance_chart').getContext('2d');
-            charts.feature = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: features.map(f => f.feature),
-                    datasets: [{data: features.map(f => f.score), backgroundColor: 'rgba(79,172,254,0.6)', borderColor: 'rgba(79,172,254,1)', borderWidth: 1}]
-                },
-                options: {indexAxis:'y', responsive:true, maintainAspectRatio:false, scales:{x:{ticks:{color:'#aaa'}}, y:{ticks:{color:'#aaa'}}}, plugins:{legend:{display:false}}}
-            });
-        }
-
-        async function startPreprocessing() {
-            const mode = document.querySelector('input[name="classification_mode"]:checked').value;
-            clearLog('preprocess_logs');
-            lastIdxs.preprocessing = 0;
-            updateStatus('preprocess_status', 'running');
-            document.getElementById('btn_preprocess').disabled = true;
-
-            const response = await fetch('/api/preprocess', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    classification_mode: mode,
-                    dataset: document.getElementById('dataset_select').value,
-                    test_size: parseFloat(document.getElementById('test_size').value),
-                    handle_outliers: document.getElementById('handle_outliers').checked,
-                    use_feature_selection: document.getElementById('use_feature_selection').checked,
-                    n_features: parseInt(document.getElementById('n_features').value),
-                    use_pca: document.getElementById('use_pca').checked,
-                    n_components: parseInt(document.getElementById('n_components').value),
-                    balance_method: document.getElementById('balance_method').value
-                })
-            });
-            const result = await response.json();
-            if (result.status !== 'started') {
-                appendLog('preprocess_logs', result.message);
-                updateStatus('preprocess_status', 'error');
-                document.getElementById('btn_preprocess').disabled = false;
-                return;
-            }
-
-            intervals.preprocessing = setInterval(async () => {
-                const statusResponse = await fetch(`/api/preprocess/status?last_idx=${lastIdxs.preprocessing}`);
-                const statusData = await statusResponse.json();
-                statusData.messages.forEach(msg => appendLog('preprocess_logs', msg));
-                lastIdxs.preprocessing = statusData.last_idx;
-
-                if (statusData.status === 'completed') {
-                    clearInterval(intervals.preprocessing);
-                    updateStatus('preprocess_status', 'completed');
-                    document.getElementById('btn_preprocess').disabled = false;
-                    fetchDataInfo();
-                } else if (statusData.status === 'error') {
-                    clearInterval(intervals.preprocessing);
-                    updateStatus('preprocess_status', 'error');
-                    document.getElementById('btn_preprocess').disabled = false;
-                }
-            }, 1000);
-        }
-
-        async function startTraining() {
-            const modelType = document.getElementById('model_type').value;
-            clearLog('train_logs');
-            lastIdxs.training = 0;
-            updateStatus('train_status', 'running');
-            document.getElementById('btn_train').disabled = true;
-
-            const params = {
-                model_type: modelType,
-                use_class_weights: document.getElementById('use_class_weights').checked
-            };
-            if (modelType === 'improved_dnn' || modelType === 'dnn') {
-                params.epochs = parseInt(document.getElementById('epochs').value);
-                params.batch_size = parseInt(document.getElementById('batch_size').value);
-                params.dropout_rate = parseFloat(document.getElementById('dropout_rate').value);
-                params.learning_rate = parseFloat(document.getElementById('learning_rate').value);
-            } else {
-                params.n_estimators = parseInt(document.getElementById('n_estimators').value);
-                params.max_depth = parseInt(document.getElementById('max_depth').value);
-                params.learning_rate = parseFloat(document.getElementById('learning_rate').value || 0.3);
-            }
-
-            const response = await fetch('/api/train', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(params)
-            });
-            const result = await response.json();
-            if (result.status !== 'started') {
-                appendLog('train_logs', result.message);
-                updateStatus('train_status', 'error');
-                document.getElementById('btn_train').disabled = false;
-                return;
-            }
-
-            intervals.training = setInterval(async () => {
-                const statusResponse = await fetch(`/api/train/status?last_idx=${lastIdxs.training}`);
-                const statusData = await statusResponse.json();
-                statusData.messages.forEach(msg => appendLog('train_logs', msg));
-                lastIdxs.training = statusData.last_idx;
-
-                if (statusData.status === 'completed') {
-                    clearInterval(intervals.training);
-                    updateStatus('train_status', 'completed');
-                    document.getElementById('btn_train').disabled = false;
-                    fetchValidationResults();
-                } else if (statusData.status === 'error') {
-                    clearInterval(intervals.training);
-                    updateStatus('train_status', 'error');
-                    document.getElementById('btn_train').disabled = false;
-                }
-            }, 2000);
-        }
-
-        async function fetchValidationResults() {
-            const response = await fetch('/api/results/validation');
-            const data = await response.json();
-            if (data.status === 'success') {
-                const r = data.data;
-                document.getElementById('val_results_card').style.display = 'block';
-                document.getElementById('no_results_card').style.display = 'none';
-                document.getElementById('val_accuracy').textContent = r.accuracy.toFixed(4);
-                document.getElementById('val_precision').textContent = r.precision_macro.toFixed(4);
-                document.getElementById('val_recall').textContent = r.recall_macro.toFixed(4);
-                document.getElementById('val_f1').textContent = r.f1_macro.toFixed(4);
-                document.getElementById('val_f1_w').textContent = r.f1_weighted.toFixed(4);
-                document.getElementById('val_time').textContent = r.train_time ? r.train_time.toFixed(2) : '-';
-
-                if (r.history) renderTrainingHistory(r.history);
-                renderROCChart(r.roc_data, 'val_roc_chart', 'val_roc');
-                renderConfusionMatrix(r.confusion_matrix, r.target_names, 'val_confusion_matrix');
-                renderPerClassTable(r.per_class, 'val_per_class_table');
-            }
-        }
-
-        function renderTrainingHistory(history) {
-            if (charts.history) charts.history.destroy();
-            const ctx = document.getElementById('training_history_chart').getContext('2d');
-            charts.history = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: history.accuracy.map((_, i) => i + 1),
-                    datasets: [
-                        {label: '训练准确率', data: history.accuracy, borderColor: '#667eea', tension: 0.3, fill: false},
-                        {label: '验证准确率', data: history.val_accuracy, borderColor: '#28a745', tension: 0.3, fill: false},
-                        {label: '训练损失', data: history.loss, borderColor: '#dc3545', tension: 0.3, fill: false, yAxisID: 'y1'},
-                        {label: '验证损失', data: history.val_loss, borderColor: '#ffc107', tension: 0.3, fill: false, yAxisID: 'y1'}
-                    ]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    scales: {y:{position:'left', ticks:{color:'#aaa'}}, y1:{position:'right', ticks:{color:'#aaa'}, grid:{drawOnChartArea:false}}, x:{ticks:{color:'#aaa'}}},
-                    plugins: {legend: {labels: {color: '#fff'}}}
-                }
-            });
-        }
-
-        function renderROCChart(roc_data, canvasId, chartKey) {
-            if (charts[chartKey]) charts[chartKey].destroy();
-            const ctx = document.getElementById(canvasId).getContext('2d');
-            const colors = ['#667eea', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#f093fb', '#4facfe', '#fa709a', '#fee140', '#30cfd0'];
-            const datasets = roc_data.map((item, i) => ({
-                label: `${item.label} (AUC:${item.auc.toFixed(3)})`,
-                data: item.fpr.map((fpr, j) => ({x: fpr, y: item.tpr[j]})),
-                borderColor: colors[i % colors.length],
-                borderWidth: 2, pointRadius: 0, fill: false
-            }));
-            datasets.push({label: '随机', data: [{x:0,y:0},{x:1,y:1}], borderColor: '#6c757d', borderWidth:1, borderDash:[5,5], pointRadius:0, fill:false});
-            charts[chartKey] = new Chart(ctx, {
-                type: 'line',
-                data: {datasets: datasets},
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    scales: {x:{type:'linear',min:0,max:1,ticks:{color:'#aaa'}}, y:{type:'linear',min:0,max:1,ticks:{color:'#aaa'}}},
-                    plugins: {legend: {labels: {color: '#fff', fontSize: 9}}}
-                }
-            });
-        }
-
-        function renderConfusionMatrix(cm, labels, elementId) {
-            let html = '<table class="table table-dark table-sm"><thead><tr><th></th>';
-            html += labels.map(l => `<th>${l}</th>`).join('');
-            html += '</tr></thead><tbody>';
-            cm.forEach((row, i) => {
-                html += `<tr><td>${labels[i]}</td>`;
-                row.forEach((val, j) => {
-                    html += `<td class="confusion-cell${i===j?' diagonal':''}">${val}</td>`;
                 });
-                html += '</tr>';
-            });
-            html += '</tbody></table>';
-            document.getElementById(elementId).innerHTML = html;
         }
 
-        function renderPerClassTable(data, tableId) {
-            const tbody = document.getElementById(tableId).querySelector('tbody');
-            tbody.innerHTML = data.map(item => `<tr><td>${item.label}</td><td>${item.precision.toFixed(4)}</td><td>${item.recall.toFixed(4)}</td><td>${item.f1.toFixed(4)}</td><td>${item.support}</td></tr>`).join('');
-        }
+        function checkPreprocessStatus() {
+            fetch('/preprocess/status')
+                .then(response => response.json())
+                .then(data => {
+                    const logArea = document.getElementById('preprocess-log');
+                    data.messages.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.className = 'log-item';
+                        div.textContent = msg;
+                        logArea.appendChild(div);
+                    });
+                    logArea.scrollTop = logArea.scrollHeight;
+                    setProgress('prep-progress-fill', 'prep-progress-text', data.progress || 0);
 
-        async function startTesting() {
-            clearLog('test_logs');
-            lastIdxs.testing = 0;
-            updateStatus('test_status', 'running');
-            document.getElementById('btn_test').disabled = true;
-
-            const response = await fetch('/api/test', {method: 'POST'});
-            const result = await response.json();
-            if (result.status !== 'started') {
-                appendLog('test_logs', result.message);
-                updateStatus('test_status', 'error');
-                document.getElementById('btn_test').disabled = false;
-                return;
-            }
-
-            intervals.testing = setInterval(async () => {
-                const statusResponse = await fetch(`/api/test/status?last_idx=${lastIdxs.testing}`);
-                const statusData = await statusResponse.json();
-                statusData.messages.forEach(msg => appendLog('test_logs', msg));
-                lastIdxs.testing = statusData.last_idx;
-
-                if (statusData.status === 'completed') {
-                    clearInterval(intervals.testing);
-                    updateStatus('test_status', 'completed');
-                    document.getElementById('btn_test').disabled = false;
-                    fetchTestResults();
-                } else if (statusData.status === 'error') {
-                    clearInterval(intervals.testing);
-                    updateStatus('test_status', 'error');
-                    document.getElementById('btn_test').disabled = false;
-                }
-            }, 2000);
-        }
-
-        async function fetchTestResults() {
-            const response = await fetch('/api/results/test');
-            const data = await response.json();
-            if (data.status === 'success') {
-                const r = data.data;
-                document.getElementById('test_metrics_row').style.display = 'flex';
-                document.getElementById('test_charts_row').style.display = 'flex';
-                document.getElementById('test_table_row').style.display = 'flex';
-                document.getElementById('test_accuracy').textContent = r.accuracy.toFixed(4);
-                document.getElementById('test_precision').textContent = r.precision_macro.toFixed(4);
-                document.getElementById('test_recall').textContent = r.recall_macro.toFixed(4);
-                document.getElementById('test_f1').textContent = r.f1_macro.toFixed(4);
-                document.getElementById('test_f1_w').textContent = r.f1_weighted.toFixed(4);
-                document.getElementById('test_count').textContent = r.test_count.toLocaleString();
-
-                renderROCChart(r.roc_data, 'test_roc_chart', 'test_roc');
-                renderConfusionMatrix(r.confusion_matrix, r.target_names, 'test_confusion_matrix');
-                renderPerClassTable(r.per_class, 'test_per_class_table');
-            }
-        }
-
-        async function startTuning() {
-            clearLog('tune_logs');
-            lastIdxs.tuning = 0;
-            updateStatus('tune_status', 'running');
-            document.getElementById('btn_tune').disabled = true;
-
-            const response = await fetch('/api/tune', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({model_type: document.getElementById('tune_model_type').value})
-            });
-            const result = await response.json();
-            if (result.status !== 'started') {
-                appendLog('tune_logs', result.message);
-                updateStatus('tune_status', 'error');
-                document.getElementById('btn_tune').disabled = false;
-                return;
-            }
-
-            intervals.tuning = setInterval(async () => {
-                const statusResponse = await fetch(`/api/tune/status?last_idx=${lastIdxs.tuning}`);
-                const statusData = await statusResponse.json();
-                statusData.messages.forEach(msg => appendLog('tune_logs', msg));
-                lastIdxs.tuning = statusData.last_idx;
-
-                if (statusData.status === 'completed') {
-                    clearInterval(intervals.tuning);
-                    updateStatus('tune_status', 'completed');
-                    document.getElementById('btn_tune').disabled = false;
-                    if (statusData.results) {
-                        renderTuningResults(statusData.results);
+                    if (data.status === 'running') {
+                        setTimeout(checkPreprocessStatus, 1000);
+                    } else if (data.status === 'completed') {
+                        document.getElementById('preprocess-status').className = 'status-badge status-completed';
+                        document.getElementById('preprocess-status').textContent = '已完成';
+                        document.getElementById('btn-reset-preprocess').disabled = false;
+                        setProgress('prep-progress-fill', 'prep-progress-text', 100);
+                    } else if (data.status === 'error') {
+                        document.getElementById('preprocess-status').className = 'status-badge status-error';
+                        document.getElementById('preprocess-status').textContent = '出错';
+                        document.getElementById('btn-reset-preprocess').disabled = false;
                     }
-                } else if (statusData.status === 'error') {
-                    clearInterval(intervals.tuning);
-                    updateStatus('tune_status', 'error');
-                    document.getElementById('btn_tune').disabled = false;
-                }
-            }, 2000);
+                });
         }
 
-        function renderTuningResults(results) {
-            document.getElementById('tune_results_row').style.display = 'flex';
-            document.getElementById('tune_best_score').textContent = results.best_score.toFixed(4);
-            document.getElementById('tune_time').textContent = results.tune_time.toFixed(2);
-            document.getElementById('tune_combinations').textContent = results.top_results.length;
-            document.getElementById('tune_best_params').textContent = JSON.stringify(results.best_params, null, 2);
-            const tbody = document.getElementById('tune_top_table').querySelector('tbody');
-            tbody.innerHTML = results.top_results.map(r => `<tr><td>#${r.rank}</td><td>${r.score.toFixed(4)}</td><td>${r.std.toFixed(4)}</td><td><code>${JSON.stringify(r.params)}</code></td></tr>`).join('');
+        function resetPreprocessing() {
+            fetch('/reset/status')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('preprocess-status').className = 'status-badge status-idle';
+                    document.getElementById('preprocess-status').textContent = '待处理';
+                    document.getElementById('btn-preprocess').disabled = false;
+                    document.getElementById('btn-reset-preprocess').disabled = true;
+                    document.getElementById('preprocess-log').innerHTML = '<div class="text-muted">点击"开始预处理"按钮运行数据预处理流程...</div>';
+                    setProgress('prep-progress-fill', 'prep-progress-text', 0);
+                });
         }
 
-        async function startComparison() {
-            const models = [];
-            if (document.getElementById('cmp_improved_dnn').checked) models.push('improved_dnn');
-            if (document.getElementById('cmp_random_forest').checked) models.push('random_forest');
-            if (document.getElementById('cmp_xgboost').checked) models.push('xgboost');
-            if (models.length === 0) { alert('请至少选择一个算法'); return; }
-
-            clearLog('compare_logs');
-            lastIdxs.comparison = 0;
-            updateStatus('compare_status', 'running');
-            document.getElementById('btn_compare').disabled = true;
-            document.getElementById('compare_results_row').style.display = 'none';
-
-            const response = await fetch('/api/compare', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({models: models, epochs: parseInt(document.getElementById('cmp_epochs').value)})
-            });
-            const result = await response.json();
-            if (result.status !== 'started') {
-                appendLog('compare_logs', result.message);
-                updateStatus('compare_status', 'error');
-                document.getElementById('btn_compare').disabled = false;
-                return;
-            }
-
-            intervals.comparison = setInterval(async () => {
-                const statusResponse = await fetch(`/api/compare/status?last_idx=${lastIdxs.comparison}`);
-                const statusData = await statusResponse.json();
-                statusData.messages.forEach(msg => appendLog('compare_logs', msg));
-                lastIdxs.comparison = statusData.last_idx;
-
-                if (statusData.status === 'completed') {
-                    clearInterval(intervals.comparison);
-                    updateStatus('compare_status', 'completed');
-                    document.getElementById('btn_compare').disabled = false;
-                    if (statusData.results && Object.keys(statusData.results).length > 0) {
-                        renderComparisonResults(statusData.results);
+        function loadDistribution() {
+            const dataset = document.getElementById('dataset-select').value;
+            fetch(`/data/distribution?dataset=${dataset}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        document.getElementById('distribution-content').innerHTML = 
+                            `<div class="alert alert-danger">${data.message}</div>`;
+                        return;
                     }
-                } else if (statusData.status === 'error') {
-                    clearInterval(intervals.comparison);
-                    updateStatus('compare_status', 'error');
-                    document.getElementById('btn_compare').disabled = false;
-                }
-            }, 2000);
-        }
-
-        function renderComparisonResults(results) {
-            document.getElementById('compare_results_row').style.display = 'flex';
-            const modelNames = {'improved_dnn':'改进型DNN', 'dnn':'基础DNN', 'random_forest':'随机森林', 'xgboost':'XGBoost'};
-            const models = Object.keys(results);
-            const tbody = document.getElementById('compare_table').querySelector('tbody');
-            tbody.innerHTML = models.map(m => {
-                const r = results[m];
-                return `<tr><td>${modelNames[m]||m}</td><td>${r.accuracy.toFixed(4)}</td><td>${r.precision_macro.toFixed(4)}</td><td>${r.recall_macro.toFixed(4)}</td><td>${r.f1_macro.toFixed(4)}</td><td>${r.f1_weighted.toFixed(4)}</td><td>${r.train_time.toFixed(2)}</td></tr>`;
-            }).join('');
-
-            const labels = models.map(m => modelNames[m]||m);
-            const accData = models.map(m => results[m].accuracy);
-            const f1Data = models.map(m => results[m].f1_macro);
-            const colors = ['#667eea', '#28a745', '#dc3545', '#ffc107'];
-
-            if (charts.compare_acc) charts.compare_acc.destroy();
-            charts.compare_acc = new Chart(document.getElementById('compare_acc_chart').getContext('2d'), {
-                type: 'bar',
-                data: {labels: labels, datasets: [{label: '准确率', data: accData, backgroundColor: colors.map(c=>c+'99'), borderColor: colors, borderWidth: 1}]},
-                options: {responsive: true, maintainAspectRatio: false, scales: {y: {min: 0, max: 1, ticks: {color: '#aaa'}}, x: {ticks: {color: '#aaa'}}}, plugins: {legend: {labels: {color: '#fff'}}}}
-            });
-
-            if (charts.compare_f1) charts.compare_f1.destroy();
-            charts.compare_f1 = new Chart(document.getElementById('compare_f1_chart').getContext('2d'), {
-                type: 'bar',
-                data: {labels: labels, datasets: [{label: 'F1(Macro)', data: f1Data, backgroundColor: colors.map(c=>c+'99'), borderColor: colors, borderWidth: 1}]},
-                options: {responsive: true, maintainAspectRatio: false, scales: {y: {min: 0, max: 1, ticks: {color: '#aaa'}}, x: {ticks: {color: '#aaa'}}}, plugins: {legend: {labels: {color: '#fff'}}}}
-            });
-        }
-
-        async function predict() {
-            const featuresStr = document.getElementById('predict_features').value;
-            const features = featuresStr.split(',').map(x => parseFloat(x.trim()));
-            const response = await fetch('/api/predict', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({features: features})
-            });
-            const data = await response.json();
-            if (data.status === 'success') {
-                document.getElementById('predict_result_card').style.display = 'block';
-                document.getElementById('no_model_card').style.display = 'none';
-                document.getElementById('predict_label').textContent = data.prediction;
-                const bars = document.getElementById('probability_bars');
-                bars.innerHTML = Object.entries(data.probabilities).sort((a,b) => b[1]-a[1]).map(([label, prob]) => `
-                    <div class="mb-2">
-                        <div class="d-flex justify-content-between mb-1">
-                            <span class="text-gray-300">${label}</span>
-                            <span class="text-gray-300">${(prob*100).toFixed(2)}%</span>
+                    
+                    const stats = data.stats;
+                    const content = `
+                        <div class="metrics-grid mb-4">
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.total_samples.toLocaleString()}</div>
+                                <div class="metric-label">总样本数</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.feature_count}</div>
+                                <div class="metric-label">特征数量</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.normal_count.toLocaleString()}</div>
+                                <div class="metric-label">正常流量</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">${stats.attack_count.toLocaleString()}</div>
+                                <div class="metric-label">攻击流量</div>
+                            </div>
                         </div>
-                        <div class="progress"><div class="progress-bar" style="width: ${prob*100}%"></div></div>
-                    </div>`).join('');
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-header">标签分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-label"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-header">攻击类别分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-category"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-header">协议类型分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-protocol"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">连接状态分布</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-flag"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">服务类型 Top 10</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-service"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('distribution-content').innerHTML = content;
+                    
+                    new Chart(document.getElementById('chart-label'), {
+                        type: 'pie',
+                        data: {
+                            labels: ['正常流量', '攻击流量'],
+                            datasets: [{
+                                data: [data.label_distribution.normal, data.label_distribution.attack],
+                                backgroundColor: ['#28a745', '#dc3545']
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
+                    });
+                    
+                    new Chart(document.getElementById('chart-category'), {
+                        type: 'bar',
+                        data: {
+                            labels: Object.keys(data.category_distribution),
+                            datasets: [{
+                                label: '数量',
+                                data: Object.values(data.category_distribution),
+                                backgroundColor: ['#667eea', '#28a745', '#ffc107', '#dc3545', '#17a2b8']
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
+                    });
+                    
+                    const protocolColors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#43e97b'];
+                    new Chart(document.getElementById('chart-protocol'), {
+                        type: 'doughnut',
+                        data: {
+                            labels: Object.keys(data.protocol_distribution),
+                            datasets: [{
+                                data: Object.values(data.protocol_distribution),
+                                backgroundColor: protocolColors.slice(0, Object.keys(data.protocol_distribution).length)
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                    labels: { boxWidth: 12, padding: 8 }
+                                }
+                            }
+                        }
+                    });
+                    
+                    const flagLabels = Object.keys(data.flag_distribution);
+                    const flagValues = Object.values(data.flag_distribution);
+                    new Chart(document.getElementById('chart-flag'), {
+                        type: 'bar',
+                        data: {
+                            labels: flagLabels,
+                            datasets: [{
+                                label: '数量',
+                                data: flagValues,
+                                backgroundColor: '#667eea'
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            indexAxis: 'y',
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                x: { beginAtZero: true }
+                            }
+                        }
+                    });
+                    
+                    const serviceLabels = Object.keys(data.service_top10);
+                    const serviceValues = Object.values(data.service_top10);
+                    new Chart(document.getElementById('chart-service'), {
+                        type: 'bar',
+                        data: {
+                            labels: serviceLabels,
+                            datasets: [{
+                                label: '数量',
+                                data: serviceValues,
+                                backgroundColor: '#764ba2'
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            indexAxis: 'y',
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                x: { beginAtZero: true }
+                            }
+                        }
+                    });
+                });
+        }
+
+        function trainModel(modelName) {
+            const btn = document.getElementById(`btn-${modelName}`);
+            const status = document.getElementById(`status-${modelName}`);
+            const logArea = document.getElementById(`log-${modelName}`);
+            const granularity = document.getElementById('train-granularity')?.value || '23';
+            const lossFn = document.getElementById('loss-function')?.value || 'CrossEntropy';
+            
+            btn.disabled = true;
+            status.className = 'status-badge status-running';
+            status.textContent = '训练中';
+            logArea.innerHTML = '';
+            
+            fetch('/train/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_name: modelName, granularity: granularity, loss_fn: lossFn })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    checkTrainStatus(modelName, granularity);
+                }
+            });
+        }
+
+        function checkTrainStatus(modelName, granularity) {
+            fetch(`/train/status/${modelName}?granularity=${granularity}`)
+                .then(response => response.json())
+                .then(data => {
+                    const logArea = document.getElementById(`log-${modelName}`);
+                    const status = document.getElementById(`status-${modelName}`);
+                    const btn = document.getElementById(`btn-${modelName}`);
+
+                    data.messages.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.className = 'log-item';
+                        div.textContent = msg;
+                        logArea.appendChild(div);
+                    });
+                    logArea.scrollTop = logArea.scrollHeight;
+                    setProgress(`prog-fill-${modelName}`, `prog-text-${modelName}`, data.progress || 0);
+
+                    if (data.status === 'running') {
+                        setTimeout(() => checkTrainStatus(modelName, granularity), 1000);
+                    } else if (data.status === 'completed') {
+                        status.className = 'status-badge status-completed';
+                        status.textContent = '已完成';
+                        btn.textContent = '重新训练';
+                        btn.disabled = false;
+                        setProgress(`prog-fill-${modelName}`, `prog-text-${modelName}`, 100);
+                    } else if (data.status === 'error') {
+                        status.className = 'status-badge status-error';
+                        status.textContent = '出错';
+                        btn.disabled = false;
+                    }
+                });
+        }
+
+        function loadComparison() {
+            const granularity = document.getElementById('comparison-granularity')?.value || '23';
+            fetch(`/results/compare?granularity=${granularity}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        document.getElementById('comparison-content').innerHTML = 
+                            `<div class="alert alert-danger">${data.message}</div>`;
+                        return;
+                    }
+                    
+                    const results = data.results;
+                    const content = `
+                        <div class="metrics-grid mb-4">
+                            ${Object.keys(results).map(name => `
+                                <div class="metric-card">
+                                    <div class="metric-value">${(results[name].accuracy * 100).toFixed(2)}%</div>
+                                    <div class="metric-label">${getModelName(name)} 准确率</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">准确率对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-accuracy"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">F1-Score 对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-f1"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">AUC 对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-auc"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">训练时间对比</div>
+                                    <div class="card-body">
+                                        <canvas id="chart-time"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-md-12">
+                                <div class="card">
+                                    <div class="card-header">详细指标对比</div>
+                                    <div class="card-body">
+                                        <table class="table table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>模型</th>
+                                                    <th>准确率</th>
+                                                    <th>精确率</th>
+                                                    <th>召回率</th>
+                                                    <th>F1-Score</th>
+                                                    <th>AUC</th>
+                                                    <th>训练时间</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${Object.keys(results).map(name => `
+                                                    <tr>
+                                                        <td>${getModelName(name)}</td>
+                                                        <td>${(results[name].accuracy * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].precision * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].recall * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].f1 * 100).toFixed(2)}%</td>
+                                                        <td>${(results[name].auc * 100).toFixed(2)}%</td>
+                                                        <td>${results[name].train_time.toFixed(2)}s</td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('comparison-content').innerHTML = content;
+                    
+                    const names = Object.keys(results).map(n => getModelName(n));
+                    const colors = ['#3498db', '#9b59b6', '#f59e0b', '#14b8a6'];
+                    
+                    new Chart(document.getElementById('chart-accuracy'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: '准确率',
+                                data: Object.values(results).map(r => r.accuracy),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+                    });
+                    
+                    new Chart(document.getElementById('chart-f1'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: 'F1-Score',
+                                data: Object.values(results).map(r => r.f1),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+                    });
+                    
+                    new Chart(document.getElementById('chart-auc'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: 'AUC',
+                                data: Object.values(results).map(r => r.auc),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+                    });
+                    
+                    new Chart(document.getElementById('chart-time'), {
+                        type: 'bar',
+                        data: {
+                            labels: names,
+                            datasets: [{
+                                label: '训练时间 (秒)',
+                                data: Object.values(results).map(r => r.train_time),
+                                backgroundColor: colors
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+                    });
+                });
+        }
+
+        function getModelName(name) {
+            const map = {
+                'xgboost': 'XGBoost',
+                'dnn': 'DNN',
+                'cnn1d': '1D-CNN',
+                'transformer': 'Transformer'
+            };
+            return map[name] || name;
+        }
+
+        function loadFeatureImportance(modelName) {
+            const granularity = document.getElementById('comparison-granularity')?.value || '23';
+            fetch(`/features/importance/${modelName}?granularity=${granularity}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        document.getElementById('feature-importance-content').innerHTML = 
+                            `<div class="alert alert-danger">${data.message}</div>`;
+                        return;
+                    }
+                    
+                    const features = data.features;
+                    const content = `
+                        <div class="card">
+                            <div class="card-header">${getModelName(modelName)} 特征重要性 Top 20</div>
+                            <div class="card-body">
+                                <canvas id="chart-feature-importance"></canvas>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('feature-importance-content').innerHTML = content;
+                    
+                    new Chart(document.getElementById('chart-feature-importance'), {
+                        type: 'bar',
+                        data: {
+                            labels: features.map(f => f.feature),
+                            datasets: [{
+                                label: '重要性',
+                                data: features.map(f => f.importance),
+                                backgroundColor: '#667eea'
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            indexAxis: 'y',
+                            scales: { x: { beginAtZero: true } }
+                        }
+                    });
+                });
+        }
+
+        function testModel(modelName) {
+            const status = document.getElementById(`test-status-${modelName}`);
+            const logArea = document.getElementById(`test-log-${modelName}`);
+            const granularity = document.getElementById('test-granularity')?.value || '23';
+            
+            status.className = 'status-badge status-running';
+            status.textContent = '测试中';
+            logArea.innerHTML = '';
+            
+            fetch('/test/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_name: modelName, test_file: 'train_test', granularity: granularity })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    checkTestStatus(modelName, granularity);
+                }
+            });
+        }
+
+        function checkTestStatus(modelName, granularity) {
+            fetch(`/test/status/${modelName}?granularity=${granularity}`)
+                .then(response => response.json())
+                .then(data => {
+                    const logArea = document.getElementById(`test-log-${modelName}`);
+                    const status = document.getElementById(`test-status-${modelName}`);
+
+                    data.messages.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.className = 'log-item';
+                        div.textContent = msg;
+                        logArea.appendChild(div);
+                    });
+                    logArea.scrollTop = logArea.scrollHeight;
+                    setProgress(`tprog-fill-${modelName}`, `tprog-text-${modelName}`, data.progress || 0);
+
+                    if (data.status === 'running') {
+                        setTimeout(() => checkTestStatus(modelName, granularity), 1000);
+                    } else if (data.status === 'completed') {
+                        status.className = 'status-badge status-completed';
+                        status.textContent = '已完成';
+                        setProgress(`tprog-fill-${modelName}`, `tprog-text-${modelName}`, 100);
+                    } else if (data.status === 'error') {
+                        status.className = 'status-badge status-error';
+                        status.textContent = '出错';
+                    }
+                });
+        }
+
+        function loadTestComparison() {
+            const models = ['xgboost', 'dnn', 'cnn1d', 'transformer'];
+            const granularity = document.getElementById('comparison-granularity')?.value || '23';
+            let results = {};
+            let completed = 0;
+            
+            models.forEach(modelName => {
+                fetch(`/test/results/${modelName}?granularity=${granularity}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            results[modelName] = data.results;
+                        }
+                        completed++;
+                        
+                        if (completed === models.length) {
+                            renderTestComparison(results);
+                        }
+                    });
+            });
+        }
+
+        function renderTestComparison(results) {
+            if (Object.keys(results).length === 0) {
+                document.getElementById('test-comparison-content').innerHTML = 
+                    `<div class="alert alert-warning">没有找到测试结果，请先测试模型</div>`;
+                return;
             }
+            
+            const content = `
+                <div class="metrics-grid mb-4">
+                    ${Object.keys(results).map(name => `
+                        <div class="metric-card">
+                            <div class="metric-value">${(results[name].accuracy * 100).toFixed(2)}%</div>
+                            <div class="metric-label">${getModelName(name)} 测试准确率</div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">测试集准确率对比</div>
+                            <div class="card-body">
+                                <canvas id="chart-test-accuracy"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">测试集F1-Score对比</div>
+                            <div class="card-body">
+                                <canvas id="chart-test-f1"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header">详细测试结果对比</div>
+                            <div class="card-body">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>模型</th>
+                                            <th>准确率</th>
+                                            <th>精确率</th>
+                                            <th>召回率</th>
+                                            <th>F1-Score</th>
+                                            <th>AUC</th>
+                                            <th>测试样本数</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${Object.keys(results).map(name => `
+                                            <tr>
+                                                <td>${getModelName(name)}</td>
+                                                <td>${(results[name].accuracy * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].precision * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].recall * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].f1 * 100).toFixed(2)}%</td>
+                                                <td>${(results[name].auc * 100).toFixed(2)}%</td>
+                                                <td>${results[name].test_samples.toLocaleString()}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('test-comparison-content').innerHTML = content;
+            
+            const names = Object.keys(results).map(n => getModelName(n));
+            const colors = ['#3498db', '#9b59b6', '#f59e0b', '#14b8a6'];
+            
+            new Chart(document.getElementById('chart-test-accuracy'), {
+                type: 'bar',
+                data: {
+                    labels: names,
+                    datasets: [{
+                        label: '测试集准确率',
+                        data: Object.values(results).map(r => r.accuracy),
+                        backgroundColor: colors
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+            });
+            
+            new Chart(document.getElementById('chart-test-f1'), {
+                type: 'bar',
+                data: {
+                    labels: names,
+                    datasets: [{
+                        label: '测试集F1-Score',
+                        data: Object.values(results).map(r => r.f1),
+                        backgroundColor: colors
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1.05 } } }
+            });
         }
-
-        async function resetSystem() {
-            Object.values(intervals).forEach(i => { if(i) clearInterval(i); });
-            Object.keys(lastIdxs).forEach(k => lastIdxs[k] = 0);
-            await fetch('/api/reset', {method: 'POST'});
-            ['preprocess_status','train_status','test_status','compare_status','tune_status'].forEach(id => updateStatus(id, 'idle'));
-            ['preprocess_logs','train_logs','test_logs','compare_logs','tune_logs'].forEach(id => clearLog(id));
-            document.getElementById('data_stats_row').style.display = 'none';
-            document.getElementById('val_results_card').style.display = 'none';
-            document.getElementById('test_metrics_row').style.display = 'none';
-            document.getElementById('test_charts_row').style.display = 'none';
-            document.getElementById('test_table_row').style.display = 'none';
-            document.getElementById('no_results_card').style.display = 'block';
-            document.getElementById('tune_results_row').style.display = 'none';
-            document.getElementById('compare_results_row').style.display = 'none';
-            document.getElementById('predict_result_card').style.display = 'none';
-            document.getElementById('no_model_card').style.display = 'block';
-            ['btn_train','btn_test','btn_predict','btn_tune','btn_compare'].forEach(id => document.getElementById(id).disabled = true);
-            document.getElementById('btn_preprocess').disabled = false;
-        }
-
-        fetchDataInfo();
     </script>
 </body>
 </html>
