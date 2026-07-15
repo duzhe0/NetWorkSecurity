@@ -319,8 +319,16 @@ def evaluate_model(model, X_test, y_test, device, num_classes):
     return metrics, y_pred, y_prob_matrix
 
 
-def evaluate_external_test_cnn1d(model, num_classes, class_names, device):
-    """在外部 train_test 集上评估 CNN1D 模型（零信息泄露）"""
+def evaluate_external_test_cnn1d(model, num_classes, class_names, device, conf_threshold=0.5):
+    """在外部 train_test 集上评估 CNN1D 模型（零信息泄露）
+    
+    Args:
+        model: 训练好的模型
+        num_classes: 类别总数
+        class_names: 类别名称列表
+        device: 计算设备
+        conf_threshold: 置信度阈值，低于此阈值的预测将被拒绝（默认 0.5）
+    """
     print("\n" + "=" * 60)
     print("外部评估 (train_test)")
     print("=" * 60)
@@ -408,18 +416,52 @@ def evaluate_external_test_cnn1d(model, num_classes, class_names, device):
     exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
     y_prob = exp_logits / exp_logits.sum(axis=1, keepdims=True)
     y_pred = np.argmax(y_prob, axis=1)
+    max_prob = y_prob.max(axis=1)
 
     y_true_v = y_test[valid_mask]
     y_pred_v = y_pred[valid_mask]
     y_prob_v = y_prob[valid_mask]
+    max_prob_v = max_prob[valid_mask]
 
-    ext_acc = accuracy_score(y_true_v, y_pred_v)
-    ext_f1 = f1_score(y_true_v, y_pred_v, average='weighted', zero_division=0)
+    # 置信度拒绝机制：低置信度样本不强制分类
+    confident_mask = max_prob_v >= conf_threshold
+    n_total = len(y_true_v)
+    n_rejected = int((~confident_mask).sum())
+    n_confident = int(confident_mask.sum())
 
-    print(f"[外部评估] Acc: {ext_acc:.4f}, F1: {ext_f1:.4f}")
+    # 全量评估（含拒绝样本，拒绝即判错）
+    ext_acc_all = accuracy_score(y_true_v, y_pred_v)
+    ext_f1_all = f1_score(y_true_v, y_pred_v, average='weighted', zero_division=0)
+
+    # 仅评估高置信度样本
+    if n_confident > 0:
+        y_true_c = y_true_v[confident_mask]
+        y_pred_c = y_pred_v[confident_mask]
+        ext_acc_conf = accuracy_score(y_true_c, y_pred_c)
+        ext_f1_conf = f1_score(y_true_c, y_pred_c, average='weighted', zero_division=0)
+    else:
+        ext_acc_conf = float('nan')
+        ext_f1_conf = float('nan')
+
+    # 拒绝样本中 unknown_attack 占比
+    if n_rejected > 0:
+        unknown_idx = len(class_names) - 1 if class_names else 23
+        rejected_true = y_true_v[~confident_mask]
+        n_unknown_rejected = int((rejected_true == unknown_idx).sum())
+    else:
+        n_unknown_rejected = 0
+
+    print(f"[外部评估] threshold={conf_threshold}")
+    print(f"  全量 {n_total} 样本: Acc={ext_acc_all:.4f}, F1={ext_f1_all:.4f}")
+    print(f"  拒绝 {n_rejected} 个 ({n_rejected/n_total*100:.1f}%)，其中 unknown_attack={n_unknown_rejected}")
+    print(f"  高置信 {n_confident} 个: Acc={ext_acc_conf:.4f}, F1={ext_f1_conf:.4f}")
 
     ext_cm = confusion_matrix(y_true_v, y_pred_v, labels=list(range(num_classes)))
-    return {'ext_acc': ext_acc, 'ext_f1': ext_f1}, ext_cm
+    return {
+        'ext_acc': ext_acc_all, 'ext_f1': ext_f1_all,
+        'ext_acc_conf': ext_acc_conf, 'ext_f1_conf': ext_f1_conf,
+        'n_rejected': n_rejected, 'n_unknown_rejected': n_unknown_rejected
+    }, ext_cm
 
 
 def plot_results(y_test, y_pred, y_prob, history, num_classes):
@@ -544,18 +586,23 @@ def main():
             'internal_auc': metrics['auc'],
             'external_acc': ext_metrics['ext_acc'],
             'external_f1': ext_metrics['ext_f1'],
+            'external_acc_conf': ext_metrics['ext_acc_conf'],
+            'external_f1_conf': ext_metrics['ext_f1_conf'],
+            'n_rejected': ext_metrics['n_rejected'],
+            'n_unknown_rejected': ext_metrics['n_unknown_rejected'],
             'train_time': train_time
         })
 
-    print("\n" + "=" * 90)
-    print("CNN1D 多方案双轨评估汇总")
-    print("=" * 90)
-    print(f"{'方案':<12} {'内部Acc':>10} {'内部F1':>10} {'内部AUC':>10} {'外部Acc':>10} {'外部F1':>10} {'耗时(s)':>8}")
-    print("-" * 90)
+    print("\n" + "=" * 110)
+    print("CNN1D 多方案双轨评估汇总（含置信度拒绝）")
+    print("=" * 110)
+    print(f"{'方案':<12} {'内部Acc':>10} {'内部F1':>10} {'外部Acc':>10} {'外部F1':>10} {'高置信Acc':>10} {'高置信F1':>10} {'拒绝数':>8} {'耗时(s)':>8}")
+    print("-" * 110)
     for r in all_results:
         print(f"{r['scheme']:<12} {r['internal_acc']:>10.4f} {r['internal_f1']:>10.4f} "
-              f"{r['internal_auc']:>10.4f} {r['external_acc']:>10.4f} {r['external_f1']:>10.4f} "
-              f"{r['train_time']:>8.1f}")
+              f"{r['external_acc']:>10.4f} {r['external_f1']:>10.4f} "
+              f"{r['external_acc_conf']:>10.4f} {r['external_f1_conf']:>10.4f} "
+              f"{r['n_rejected']:>8d} {r['train_time']:>8.1f}")
 
     df_summary = pd.DataFrame(all_results)
     df_summary.to_csv('results_cnn1d_schemes_summary.csv', index=False)
