@@ -15,6 +15,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+import sys
+
+# 确保可以从 models.losses 导入
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from models.losses import FocalLoss
+from models.embedding_utils import ServiceEmbeddingModel, compute_embedded_input_dim, SERVICE_EMBEDDING_DIM
 
 # 设置中文显示
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
@@ -80,7 +86,8 @@ def load_preprocessed_data():
     print("DNN 深度神经网络训练")
     print("=" * 60)
 
-    data_dir = "../../Train/"
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    data_dir = os.path.join(base_dir, "Train") + os.sep
 
     # 分别加载训练集、验证集、测试集
     df_train = pd.read_csv(data_dir + "KDDTrain_preprocessed_train.csv")
@@ -125,7 +132,7 @@ def load_preprocessed_data():
     return X_train, X_val, X_test, y_train, y_val, y_test, feature_cols, num_classes
 
 
-def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size=64,
+def train_dnn(X_train, X_val, y_train, y_val, num_classes, feature_cols, epochs=50, batch_size=64,
               weight_scheme='sqrt'):
     """训练DNN模型（多分类），在验证集上监控
     
@@ -136,6 +143,8 @@ def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size
     print("=" * 60)
 
     input_dim = X_train.shape[1]
+    # 计算 Entity Embedding 后的实际输入维度
+    embedded_dim = compute_embedded_input_dim(feature_cols, SERVICE_EMBEDDING_DIM)
 
     # 模型参数
     hidden_dims = [256, 128, 64]
@@ -143,10 +152,11 @@ def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size
     learning_rate = 0.001
 
     print(f"\nDNN网络结构（多分类）:")
-    print(f"  输入层: {input_dim} 维")
+    print(f"  原始特征: {input_dim} 维（含 68 列 service OneHot + 1 列 service_encoded）")
+    print(f"  Embedding后: {embedded_dim} 维（service 68维OneHot → {SERVICE_EMBEDDING_DIM}维Embedding）")
     print(f"  隐藏层: {hidden_dims}")
     print(f"  Dropout率: {dropout_rate}")
-    print(f"  输出层: {num_classes} 维 (softmax via CrossEntropyLoss)")
+    print(f"  输出层: {num_classes} 维 (softmax via FocalLoss, gamma=2.0)")
     print(f"  学习率: {learning_rate}")
     print(f"  训练轮数: {epochs}")
     print(f"  批大小: {batch_size}")
@@ -155,7 +165,9 @@ def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n使用设备: {device}")
 
-    model = DNN(input_dim, num_classes, hidden_dims, dropout_rate).to(device)
+    base_model = DNN(embedded_dim, num_classes, hidden_dims, dropout_rate)
+    model = ServiceEmbeddingModel(base_model, vocab_size=69, feature_cols=feature_cols)
+    model = model.to(device)
 
     # 类别加权
     if weight_scheme == 'none':
@@ -186,8 +198,8 @@ def train_dnn(X_train, X_val, y_train, y_val, num_classes, epochs=50, batch_size
             zero_classes = np.where(class_weights == 0)[0]
             print(f"[类别加权] 训练集缺失类别（权重=0）: {list(zero_classes)}")
 
-    # 多分类：使用 CrossEntropyLoss（可加权）
-    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    # 多分类：使用 Focal Loss（类别加权 + 难样本聚焦）
+    criterion = FocalLoss(alpha=class_weights_tensor, gamma=2.0)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # 准备训练和验证数据
@@ -322,8 +334,11 @@ def evaluate_external_test_dnn(model, num_classes, class_names, device):
     # 加载预处理工具
     ohe_path = os.path.join(base_dir, 'Train', 'encoder_onehot.pkl')
     scaler_path = os.path.join(base_dir, 'Train', 'scaler_robust.pkl')
+    service_le_path = os.path.join(base_dir, 'Train', 'encoder_service_embedding.pkl')
     ohe = _joblib.load(ohe_path)
     scaler = _joblib.load(scaler_path)
+    service_le = _joblib.load(service_le_path)
+    UNK_SERVICE_IDX = len(service_le.classes_)
 
     # 加载 train_test 原始数据
     test_path = os.path.join(base_dir, 'Train', 'train_test')
@@ -339,6 +354,12 @@ def evaluate_external_test_dnn(model, num_classes, class_names, device):
         df_test['label_multiclass_encoded'] = 0
 
     y_test_orig = df_test['label_multiclass_encoded'].values
+
+    # Service 安全编码（OOV → UNK）
+    known_services = set(service_le.classes_)
+    df_test['service_encoded'] = df_test['service'].apply(
+        lambda x: service_le.transform([x])[0] if x in known_services else UNK_SERVICE_IDX
+    )
 
     # 从训练集获取特征列顺序
     train_csv_path = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_train.csv')
@@ -363,7 +384,9 @@ def evaluate_external_test_dnn(model, num_classes, class_names, device):
     # 标准化（仅 transform）
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
     # Binary Indicator
-    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration',
+                           'num_failed_logins', 'num_shells', 'num_access_files',
+                           'num_file_creations', 'num_root']
     BINARY_INDICATOR_COLS = []
     for col in ZERO_INFLATED_COLS:
         if col in df_test_enc.columns:
@@ -371,7 +394,7 @@ def evaluate_external_test_dnn(model, num_classes, class_names, device):
             df_test_enc[indicator_name] = (df_test_enc[col] == 0).astype(int)
             BINARY_INDICATOR_COLS.append(indicator_name)
     # Log1p transform
-    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration', 'hot']
     for col in LOGP1_COLS:
         if col in df_test_enc.columns:
             df_test_enc[col] = np.log1p(df_test_enc[col])
@@ -528,7 +551,7 @@ def main():
 
         # 2. 训练
         model, train_time, history, device = train_dnn(
-            X_train, X_val, y_train, y_val, num_classes,
+            X_train, X_val, y_train, y_val, num_classes, feature_cols,
             weight_scheme=scheme)
 
         # 3. 内部测试集评估

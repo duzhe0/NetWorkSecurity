@@ -261,7 +261,9 @@ def encode_and_scale(df_train, df_val, df_test):
 
     # ========== 零膨胀 Binary Indicator ==========
     # 对大量为 0 的列创建 is_zero 标记，保留"是否为 0"的区分信号
-    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration',
+                           'num_failed_logins', 'num_shells', 'num_access_files',
+                           'num_file_creations', 'num_root']
     BINARY_INDICATOR_COLS = []
     for col in ZERO_INFLATED_COLS:
         if col in df_train.columns:
@@ -275,6 +277,37 @@ def encode_and_scale(df_train, df_val, df_test):
     print(f"\n[Binary Indicator] 新增 {len(BINARY_INDICATOR_COLS)} 列: {BINARY_INDICATOR_COLS}")
     for col, ratio in zero_ratio.items():
         print(f"  {col}: {ratio:.1%} 的值为 0")
+
+    # ---------- Service LabelEncoder（给 Entity Embedding 用） ----------
+    # 保留整数编码的 service，供 DL 模型的 nn.Embedding 层使用
+    # OneHot 的 68 列 service_* 仍保留给 XGBoost
+    service_le = LabelEncoder()
+    service_le.fit(df_train['service'])
+    SERVICE_VOCAB_SIZE = len(service_le.classes_) + 1  # +1 for UNK (unknown service)
+
+    def _safe_service_encode(series, encoder, unk_idx):
+        """编码 service，未见过的值映射到 UNK 索引"""
+        result = []
+        class_set = set(encoder.classes_)
+        for val in series:
+            if val in class_set:
+                result.append(encoder.transform([val])[0])
+            else:
+                result.append(unk_idx)
+        return np.array(result, dtype=np.int64)
+
+    UNK_SERVICE_IDX = SERVICE_VOCAB_SIZE - 1
+    service_le.vocab_size = SERVICE_VOCAB_SIZE
+    service_le.unk_idx = UNK_SERVICE_IDX
+    df_train['service_encoded'] = service_le.transform(df_train['service'])
+    df_val['service_encoded'] = _safe_service_encode(df_val['service'], service_le, UNK_SERVICE_IDX)
+    df_test['service_encoded'] = _safe_service_encode(df_test['service'], service_le, UNK_SERVICE_IDX)
+
+    oov_train = np.sum(df_train['service_encoded'] == UNK_SERVICE_IDX)
+    oov_val = np.sum(df_val['service_encoded'] == UNK_SERVICE_IDX)
+    oov_test = np.sum(df_test['service_encoded'] == UNK_SERVICE_IDX)
+    print(f"\n[Service Embedding] LabelEncoder fitted, vocab_size={SERVICE_VOCAB_SIZE} (含UNK={UNK_SERVICE_IDX})")
+    print(f"  OOV样本: train={oov_train}, val={oov_val}, test={oov_test}")
 
     # ---------- One-Hot 编码 ----------
     print("\n[One-Hot 编码] 使用 sklearn OneHotEncoder（可持久化，对新数据一致）")
@@ -309,7 +342,7 @@ def encode_and_scale(df_train, df_val, df_test):
     df_test_enc = df_test_enc[df_train_enc.columns]
 
     # ========== Log1p 变换：压缩极端偏态分布 ==========
-    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration', 'hot']
     for col in LOGP1_COLS:
         if col in df_train_enc.columns:
             df_train_enc[col] = np.log1p(df_train_enc[col])
@@ -345,7 +378,7 @@ def encode_and_scale(df_train, df_val, df_test):
     print(f"  训练集缩放后中位数(前5): {np.median(df_train_scaled[numeric_cols[:5]].values, axis=0).round(4)}")
     print(f"  训练集缩放后IQR(前5): {np.subtract(*np.percentile(df_train_scaled[numeric_cols[:5]].values, [75, 25], axis=0)).round(4)}")
 
-    return df_train_scaled, df_val_scaled, df_test_scaled, ohe, scaler, ohe_feature_names
+    return df_train_scaled, df_val_scaled, df_test_scaled, ohe, scaler, ohe_feature_names, service_le
 
 
 def main(data_file='KDDTrain+.txt', data_dir='../Train'):
@@ -376,7 +409,7 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     df_train, df_val, df_test = split_data(df, test_size=0.2, val_size=0.1)
 
     # Step 5: 在训练集上 fit 编码器和标准化器，验证/测试集只 transform
-    df_train_processed, df_val_processed, df_test_processed, ohe, scaler, ohe_feature_names = \
+    df_train_processed, df_val_processed, df_test_processed, ohe, scaler, ohe_feature_names, service_le = \
         encode_and_scale(df_train, df_val, df_test)
 
     # 确定特征列（排除所有标签列：原始label, difficulty, label_binary, label_category, label_category_encoded, label_multiclass, label_multiclass_encoded）
@@ -398,6 +431,7 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     print(f"  - 数值型特征: {len([c for c in NUMERIC_FEATURES if c in feature_cols])} 个（已缩放）+ "
           f"{sum(1 for c in feature_cols if 'is_zero_' in c)} 个 Binary Indicator")
     print(f"  - One-Hot编码特征: {len(ohe_feature_names)} 个")
+    print(f"  - Entity Embedding: service_encoded（整数索引，供DL模型nn.Embedding）")
     print(f"标签列:")
     print(f"  - label_binary: 二分类 (normal/attack)")
     print(f"  - label_category_encoded: 5大分类 (normal/dos/probe/r2l/u2r)")
@@ -409,7 +443,7 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     print(f"  - 测试集绝对不参与训练过程，仅做最终评估")
 
     # 保存数据
-    output_dir = "../Train"
+    output_dir = data_dir
 
     df_train_processed.to_csv(f"{output_dir}/KDDTrain_preprocessed_train.csv", index=False)
     df_val_processed.to_csv(f"{output_dir}/KDDTrain_preprocessed_val.csv", index=False)
@@ -417,7 +451,9 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
 
     # 保存编码器和标准化器（供未来新数据使用）
     joblib.dump(ohe, f"{output_dir}/encoder_onehot.pkl")
+
     joblib.dump(scaler, f"{output_dir}/scaler_robust.pkl")
+    joblib.dump(service_le, f"{output_dir}/encoder_service_embedding.pkl")
     joblib.dump({'feature_cols': feature_cols, 'ohe_feature_names': list(ohe_feature_names)},
                 f"{output_dir}/preprocessing_metadata.pkl")
     # 保存 24 分类标签列表（供模型推理时将预测索引映射回具体类型）
@@ -436,6 +472,7 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     print(f"  测试集: {output_dir}/KDDTrain_preprocessed_test.csv")
     print(f"  OneHot编码器: {output_dir}/encoder_onehot.pkl")
     print(f"  缩放器: {output_dir}/scaler_robust.pkl")
+    print(f"  Service Embedding编码器: {output_dir}/encoder_service_embedding.pkl")
     print(f"  预处理元数据: {output_dir}/preprocessing_metadata.pkl")
     print(f"  23分类标签编码器: {output_dir}/encoder_multiclass_23.pkl")
     print(f"  5分类标签编码器: {output_dir}/encoder_category_5.pkl")

@@ -81,7 +81,9 @@ def preprocess_test_data(test_path, base_dir, ohe, scaler):
     # 标准化
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
     # Binary Indicator
-    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    ZERO_INFLATED_COLS = ['src_bytes', 'dst_bytes', 'duration',
+                           'num_failed_logins', 'num_shells', 'num_access_files',
+                           'num_file_creations', 'num_root']
     BINARY_INDICATOR_COLS = []
     for col in ZERO_INFLATED_COLS:
         if col in df_test_enc.columns:
@@ -89,7 +91,7 @@ def preprocess_test_data(test_path, base_dir, ohe, scaler):
             df_test_enc[indicator_name] = (df_test_enc[col] == 0).astype(int)
             BINARY_INDICATOR_COLS.append(indicator_name)
     # Log1p transform
-    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration']
+    LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration', 'hot']
     for col in LOGP1_COLS:
         if col in df_test_enc.columns:
             df_test_enc[col] = np.log1p(df_test_enc[col])
