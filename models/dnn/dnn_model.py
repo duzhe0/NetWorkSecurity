@@ -21,7 +21,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
 
 class DNN(nn.Module):
-    """深度神经网络模型（多分类版：22 类 = normal + 21 种攻击）"""
+    """深度神经网络模型（多分类版：23 类 = normal + 22 种攻击）"""
     def __init__(self, input_dim, num_classes, hidden_dims=[256, 128, 64], dropout_rate=0.3):
         super(DNN, self).__init__()
 

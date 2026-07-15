@@ -412,23 +412,25 @@ def train_model():
                 os.environ['DYLD_LIBRARY_PATH'] = '/opt/homebrew/opt/libomp/lib:' + os.environ.get('DYLD_LIBRARY_PATH', '')
                 import xgboost as xgb
 
-                # XGBoost multi:softprob 要求 y 从 0 到 num_class-1 连续且全部出现
-                # 解决方案：用训练集出现的标签建映射，val/test 独有的标签映射到 0
-                train_labels = sorted(np.unique(y_train))
-                label_map = {old: i for i, old in enumerate(train_labels)}
-                y_train = np.array([label_map[y] for y in y_train], dtype=np.int64)
-                y_val   = np.array([label_map.get(y, 0) for y in y_val], dtype=np.int64)
-                y_test  = np.array([label_map.get(y, 0) for y in y_test], dtype=np.int64)
-                actual_num_class = len(label_map)
-                add_message(task_key,f'标签重编码: {actual_num_class} 个连续标签 (训练集出现)')
-
-                # 保存重编码映射，供测试时复用，确保标签空间一致
-                _xgb_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'xgboost')
-                os.makedirs(_xgb_dir, exist_ok=True)
-                with open(os.path.join(_xgb_dir, f'xgboost_label_map_{granularity}class.pkl'), 'wb') as _f:
-                    pickle.dump({'label_map': label_map, 'train_labels': train_labels,
-                                 'num_class': actual_num_class}, _f)
-                add_message(task_key,f'已保存标签重编码映射（{actual_num_class} 类连续空间）')
+                # XGBoost multi:softprob 要求标签 0..num_classes-1 连续且全部出现。
+                # 训练集中缺失的类别（例如 20% 子集缺少 perl，其固定索引为 12）用零权重
+                # 虚拟样本补齐，保证模型输出空间恒为 num_classes（23），与神经网络一致，
+                # 无需标签重编码，预测空间与编码空间直接对应。
+                unique_train = np.unique(y_train)
+                if len(unique_train) < num_classes:
+                    missing = sorted(set(range(num_classes)) - set(unique_train.tolist()))
+                    add_message(task_key, f'训练集缺少 {len(missing)} 个类别，添加零权重虚拟样本补齐: {missing}')
+                    X_dummy = np.zeros((len(missing), X_train.shape[1]), dtype=np.float32)
+                    y_dummy = np.array(missing, dtype=np.int64)
+                    X_train_fit = np.vstack([X_train, X_dummy])
+                    y_train_fit = np.concatenate([y_train, y_dummy])
+                    sample_weight = np.ones(len(X_train_fit), dtype=np.float32)
+                    sample_weight[-len(missing):] = 0.0
+                else:
+                    X_train_fit = X_train
+                    y_train_fit = y_train
+                    sample_weight = None
+                add_message(task_key, f'XGBoost 标签空间: 0..{num_classes - 1}（{num_classes} 类直接训练，无重编码）')
                 update_progress(task_key, 12)
 
                 params = {
@@ -436,7 +438,7 @@ def train_model():
                     'max_depth': 8,
                     'learning_rate': 0.1,
                     'objective': 'multi:softprob',
-                    'num_class': actual_num_class,
+                    'num_class': num_classes,
                     'eval_metric': 'mlogloss',
                     'use_label_encoder': False,
                     'random_state': 42,
@@ -444,14 +446,18 @@ def train_model():
                     'tree_method': 'hist'
                 }
 
-                add_message(task_key,f'XGBoost (23 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
+                add_message(task_key,f'XGBoost ({granularity} 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
                 add_message(task_key,'开始训练（eval_set 使用验证集，非测试集）...')
                 update_progress(task_key, 20)
 
                 start_time = time.time()
                 model = xgb.XGBClassifier(**params)
-                # 关键修复：eval_set 使用验证集，而非测试集
-                model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+                # eval_set 使用验证集，非测试集；y_val/y_train 均为 0..num_classes-1 编码空间
+                if sample_weight is not None:
+                    model.fit(X_train_fit, y_train_fit, sample_weight=sample_weight,
+                              eval_set=[(X_val, y_val)], verbose=False)
+                else:
+                    model.fit(X_train_fit, y_train_fit, eval_set=[(X_val, y_val)], verbose=False)
                 train_time = time.time() - start_time
                 update_progress(task_key, 85)
 
@@ -615,7 +621,7 @@ def train_model():
             else:  # xgboost
                 y_pred = model.predict(X_test)
                 y_prob_matrix = model.predict_proba(X_test)
-                # 评估用类别数：XGBoost 可能因标签空隙而小于总类别数
+                # XGBoost 直接在 0..num_classes-1 空间训练，预测与标签空间一致
                 eval_classes = model.n_classes_ if hasattr(model, 'n_classes_') else num_classes
 
             accuracy = accuracy_score(y_test, y_pred)
@@ -887,7 +893,8 @@ def test_model():
                         lambda x: ATTACK_CATEGORIES.get(x, 'normal')).map(label_to_idx).fillna(
                         label_to_idx.get('normal', 0)).astype(int)
                 else:
-                    df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(0).astype(int)
+                    # 未知标签(训练集23类之外的新攻击)映射为 -1，评估时剔除，与 eval_*_train_test.py 对齐
+                    df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(-1).astype(int)
             else:
                 if granularity == '5':
                     # 5 类编码器不存在：动态从训练集 label_category 列构建映射
@@ -1004,43 +1011,24 @@ def test_model():
 
             elif model_name == 'xgboost':
                 model = joblib.load(model_path)
-
-                # 加载训练时的标签重编码映射，统一到模型输出空间评估
-                label_map_path = os.path.join(model_dir, f'xgboost_label_map_{granularity}class.pkl')
-                if not os.path.exists(label_map_path) and granularity == '23':
-                    label_map_path = os.path.join(model_dir, 'xgboost_label_map.pkl')
-                if os.path.exists(label_map_path):
-                    with open(label_map_path, 'rb') as _f:
-                        _saved_map = pickle.load(_f)
-                    _lm = _saved_map['label_map']
-                    # 将 y_test 重编码到模型空间；训练集未出现的标签剔除
-                    y_test_remapped = np.array([_lm.get(int(v), -1) for v in y_test], dtype=np.int64)
-                    _mask = y_test_remapped >= 0
-                    _n_drop = int((~_mask).sum())
-                    if _n_drop > 0:
-                        add_message(task_key, f'注: 测试集中 {_n_drop} 个样本标签在训练集未出现，评估时已剔除')
-                    y_test = y_test_remapped[_mask]
-                    X_test = X_test[_mask]
-                    y_pred_encoded = model.predict(X_test)
-                    y_prob_matrix = model.predict_proba(X_test)
-                    # 预测已在模型空间，直接使用
-                    y_pred = y_pred_encoded.astype(np.int64)
-                else:
-                    # 向后兼容：无映射文件时用原始编码（旧模型）
-                    add_message(task_key, '警告: 未找到标签映射文件，使用原始编码空间评估')
-                    y_pred_encoded = model.predict(X_test)
-                    y_prob_matrix = model.predict_proba(X_test)
-                    train_csv_path = os.path.join(base_dir, 'Train', 'KDDTrain_preprocessed_train.csv')
-                    if os.path.exists(train_csv_path):
-                        df_train_full = pd.read_csv(train_csv_path, usecols=['label_multiclass_encoded'])
-                        train_labels = sorted(df_train_full['label_multiclass_encoded'].unique())
-                        idx_to_original = {i: old for i, old in enumerate(train_labels)}
-                        y_pred = np.array([idx_to_original.get(p, 0) for p in y_pred_encoded], dtype=np.int64)
-                    else:
-                        y_pred = y_pred_encoded.astype(np.int64)
+                # 新版 XGBoost 在训练阶段已通过零权重虚拟样本补齐到 num_classes(=23) 类，
+                # 预测空间与编码空间直接一致，无需任何标签重编码。
+                y_pred = model.predict(X_test).astype(np.int64)
+                y_prob_matrix = model.predict_proba(X_test)
+                num_classes = model.n_classes_ if hasattr(model, 'n_classes_') else y_prob_matrix.shape[1]
 
             add_message(task_key, f'预测完成')
             update_progress(task_key, 75)
+
+            # 与 eval_*_train_test.py 对齐：剔除测试集中未知标签(-1)的样本，
+            # 这些样本属于训练集 23 类之外的新攻击类型，无法做多分类评估。
+            valid_mask = y_test >= 0
+            n_dropped = int((~valid_mask).sum())
+            if n_dropped > 0:
+                add_message(task_key, f'注: 测试集中 {n_dropped} 个样本标签不在训练集 23 类中，评估时已剔除')
+                y_test = y_test[valid_mask]
+                y_pred = y_pred[valid_mask]
+                y_prob_matrix = y_prob_matrix[valid_mask]
 
             # 所有模型均为 23 分类任务，统一使用多分类评估指标
             accuracy = accuracy_score(y_test, y_pred)
@@ -1066,8 +1054,8 @@ def test_model():
                     auc = np.mean(aucs) if aucs else float('nan')
                 except Exception:
                     auc = float('nan')
-            cm = confusion_matrix(y_test, y_pred).tolist()
-            add_message(task_key, f'测试集评估结果（多分类 {y_prob_matrix.shape[1]} 类）:')
+            cm = confusion_matrix(y_test, y_pred, labels=list(range(num_classes))).tolist()
+            add_message(task_key, f'测试集评估结果（多分类 {num_classes} 类）:')
             add_message(task_key, f'  准确率: {accuracy:.4f}')
             add_message(task_key, f'  精确率 (weighted): {precision:.4f}')
             add_message(task_key, f'  召回率 (weighted): {recall:.4f}')

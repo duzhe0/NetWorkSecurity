@@ -46,6 +46,16 @@ ATTACK_CATEGORIES = {
     'normal': 'normal'
 }
 
+# KDD Cup 99 训练集的 23 种流量类型（normal + 22 种具体攻击），按字母序固定。
+# 无论使用完整训练集(KDDTrain+.txt, 23 类) 还是 20% 子集(KDDTrain+_20Percent.txt, 缺 perl 仅 22 类)，
+# 都以此列表为准做编码，保证类别数恒为 23，模型输出维度与混淆矩阵恒为 23。
+MULTICLASS_23_CLASSES = [
+    'back', 'buffer_overflow', 'ftp_write', 'guess_passwd', 'imap',
+    'ipsweep', 'land', 'loadmodule', 'multihop', 'neptune', 'nmap',
+    'normal', 'perl', 'phf', 'pod', 'portsweep', 'rootkit', 'satan',
+    'smurf', 'spy', 'teardrop', 'warezclient', 'warezmaster'
+]
+
 # 类别型特征
 CATEGORICAL_FEATURES = ['protocol_type', 'service', 'flag']
 
@@ -129,9 +139,15 @@ def preprocess_labels(df):
         print(f"  {i} -> {class_name}")
 
     # 4. 23 细分类标签：normal + 22 种具体攻击类型
+    # 使用固定的 23 类列表编码（而非 LabelEncoder.fit_transform 自动发现），
+    # 保证无论训练集是否包含全部稀有攻击（如 perl），编码空间恒为 23 类。
+    # 不在 23 类列表中的标签（例如测试集才出现的新攻击）编码为 -1，后续评估时剔除。
     df['label_multiclass'] = df['label']  # 原始具体类型
+    class_to_idx = {name: i for i, name in enumerate(MULTICLASS_23_CLASSES)}
+    df['label_multiclass_encoded'] = df['label'].map(class_to_idx).fillna(-1).astype(int)
+    # LabelEncoder 仅用于持久化 classes_（与历史产物兼容），在固定列表上 fit
     le_multiclass = LabelEncoder()
-    df['label_multiclass_encoded'] = le_multiclass.fit_transform(df['label_multiclass'])
+    le_multiclass.fit(MULTICLASS_23_CLASSES)
 
     print("\n【23 分类标签分布】")
     mc_counts = df['label_multiclass'].value_counts()
@@ -383,7 +399,7 @@ def main(data_file='KDDTrain+_20Percent.txt', data_dir='../Train'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='KDD Cup 99 数据预处理')
-    parser.add_argument('--dataset', type=str, default='20percent',
+    parser.add_argument('--dataset', type=str, default='full',
                         choices=['full', '20percent'],
                         help='使用的数据集: full(完整训练集125k) 或 20percent(20%训练集25k)，默认 20percent')
     parser.add_argument('--data_dir', type=str, default='../Train',
