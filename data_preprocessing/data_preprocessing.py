@@ -381,6 +381,82 @@ def encode_and_scale(df_train, df_val, df_test):
     return df_train_scaled, df_val_scaled, df_test_scaled, ohe, scaler, ohe_feature_names, service_le
 
 
+def oversample_rare_classes(df_train, label_col='label_multiclass_encoded', min_samples=200, noise_sigma=0.05):
+    """对训练集中样本数 < min_samples 的稀有类做噪声过采样。
+
+    策略：
+    - 数值型列：加高斯噪声 N(0, noise_sigma)
+    - Binary Indicator 列：保持原值（不引入中间值）
+    - OneHot 列：保持原值（不破坏 one-hot 结构）
+
+    Returns:
+        df_augmented, oversample_stats: 增强后的DataFrame和统计信息
+    """
+    import numpy as np
+
+    y = df_train[label_col].values.astype(int)
+    class_counts = {}
+    for c in sorted(set(y)):
+        class_counts[c] = int((y == c).sum())
+
+    # 找出需要过采样的稀有类
+    rare_classes = {c: cnt for c, cnt in class_counts.items() if cnt < min_samples}
+    if not rare_classes:
+        print("[过采样] 所有类样本数 >= min_samples，无需过采样")
+        return df_train, {}
+
+    print(f"[过采样] 发现 {len(rare_classes)} 个稀有类（< {min_samples} 样本）:")
+    for c, cnt in sorted(rare_classes.items(), key=lambda x: x[1]):
+        print(f"  类 {c}: {cnt} -> {min_samples}")
+
+    # 区分列类型
+    exclude_cols = [label_col, 'label', 'difficulty', 'label_binary',
+                    'label_category', 'label_category_encoded',
+                    'label_multiclass', 'label_multiclass_encoded']
+    # 只对 feature 列做增强
+    feature_cols = [c for c in df_train.columns if c not in exclude_cols]
+    binary_cols = [c for c in feature_cols if c.startswith('is_zero_')]
+    ohe_protocol = [c for c in feature_cols if c.startswith('protocol_type_')]
+    ohe_service = [c for c in feature_cols if c.startswith('service_')]
+    ohe_flag = [c for c in feature_cols if c.startswith('flag_')]
+    ohe_cols = ohe_protocol + ohe_service + ohe_flag
+    numeric_cols = [c for c in feature_cols
+                    if c not in binary_cols and c not in ohe_cols and c != 'service_encoded']
+
+    print(f"  数值列: {len(numeric_cols)}, 二元列: {len(binary_cols)}, OneHot: {len(ohe_cols)}")
+
+    # 生成增强样本
+    new_rows = []
+    rng = np.random.RandomState(42)
+    stats = {}
+
+    for cls, cnt in sorted(rare_classes.items(), key=lambda x: x[1]):
+        need = min_samples - cnt
+        cls_mask = y == cls
+        cls_df = df_train[cls_mask]
+
+        # 对于每个需要生成的样本，随机选一个原样本加噪声
+        generated = 0
+        for i in range(need):
+            idx = rng.randint(0, cnt)
+            row = cls_df.iloc[idx].copy()
+
+            # 数值列加噪声
+            row[numeric_cols] = row[numeric_cols] + rng.normal(0, noise_sigma, len(numeric_cols))
+
+            # Binary列和OHE列保持不变（已经是0/1）
+            new_rows.append(row)
+            generated += 1
+
+        stats[cls] = {'before': cnt, 'after': cnt + generated}
+
+    # 拼接
+    df_augmented = pd.concat([df_train, pd.DataFrame(new_rows)], ignore_index=True)
+    print(f"[过采样] 训练集 {len(df_train)} -> {len(df_augmented)} 条")
+
+    return df_augmented, stats
+
+
 def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     """主函数：完整的数据预处理流程（防数据泄漏版本）
 
@@ -411,6 +487,11 @@ def main(data_file='KDDTrain+.txt', data_dir='../Train'):
     # Step 5: 在训练集上 fit 编码器和标准化器，验证/测试集只 transform
     df_train_processed, df_val_processed, df_test_processed, ohe, scaler, ohe_feature_names, service_le = \
         encode_and_scale(df_train, df_val, df_test)
+
+    # Step 5.5: 对训练集稀有类做噪声过采样（验证/测试集不动）
+    df_train_processed, oversample_stats = oversample_rare_classes(
+        df_train_processed, label_col='label_multiclass_encoded', min_samples=200, noise_sigma=0.05
+    )
 
     # 确定特征列（排除所有标签列：原始label, difficulty, label_binary, label_category, label_category_encoded, label_multiclass, label_multiclass_encoded）
     exclude_cols = ['label', 'difficulty', 'label_binary',
