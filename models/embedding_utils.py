@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 
-SERVICE_EMBEDDING_DIM = 10  # Embedding 输出维度
+SERVICE_EMBEDDING_DIM = 20  # Embedding 输出维度（68维service→20维）
 
 
 class ServiceEmbeddingModel(nn.Module):
