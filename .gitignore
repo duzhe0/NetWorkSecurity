@@ -1,6 +1,8 @@
 data/
 AIMemory/
+__pycache__/
 data_preprocessing/__pycache__/
+models/**/__pycache__/
 models/dnn/*.pth
 models/dnn/*.csv
 models/xgboost/*.pkl
@@ -11,6 +13,10 @@ models/cnn1d/*.png
 models/transformer/*.pth
 models/transformer/*.csv
 models/transformer/*.png
+models/two_stage/grid_search_dual_threshold.csv
+model_*.pth
+model_*.pkl
+results_*_schemes_summary.csv
 Train/encoder_multiclass_23_classes.txt
 Train/encoder_multiclass_23.pkl
 Train/encoder_category_5.pkl
@@ -22,6 +28,7 @@ Train/KDDTrain_preprocessed_val.csv
 Train/KDDTrain_preprocessed.csv
 Train/preprocessing_metadata.pkl
 Train/scaler_robust.pkl
+Train/scaler_standard.pkl
 Visualization/confusion_matrix_comparison.png
 Visualization/confusion_matrix_comparison_external.png
 web_app/__pycache__/

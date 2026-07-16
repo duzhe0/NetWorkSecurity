@@ -341,6 +341,43 @@ def encode_and_scale(df_train, df_val, df_test):
     df_val_enc = df_val_enc[df_train_enc.columns]
     df_test_enc = df_test_enc[df_train_enc.columns]
 
+    # ========== 手工特征工程：针对 R2L（guess_passwd）增强 ==========
+    # 1. is_ftp_telnet: service 是 ftp/telnet/ftp_data 的二元指示
+    ftp_telnet_cols = [c for c in ['service_ftp', 'service_telnet', 'service_ftp_data']
+                       if c in df_train_enc.columns]
+    df_train_enc['is_ftp_telnet'] = df_train_enc[ftp_telnet_cols].max(axis=1) if ftp_telnet_cols else 0
+    if ftp_telnet_cols:
+        df_val_enc['is_ftp_telnet'] = df_val_enc[ftp_telnet_cols].max(axis=1)
+        df_test_enc['is_ftp_telnet'] = df_test_enc[ftp_telnet_cols].max(axis=1)
+    else:
+        df_val_enc['is_ftp_telnet'] = 0
+        df_test_enc['is_ftp_telnet'] = 0
+
+    # 2. svc_auth_fail_score: ftp/telnet 服务下的登录失败比例
+    eps = 1e-6
+    df_train_enc['svc_auth_fail_score'] = (
+        df_train_enc['is_ftp_telnet'] *
+        df_train_enc['num_failed_logins'] / (df_train_enc['num_failed_logins'] + df_train_enc['num_compromised'] + eps)
+    )
+    df_val_enc['svc_auth_fail_score'] = (
+        df_val_enc['is_ftp_telnet'] *
+        df_val_enc['num_failed_logins'] / (df_val_enc['num_failed_logins'] + df_val_enc['num_compromised'] + eps)
+    )
+    df_test_enc['svc_auth_fail_score'] = (
+        df_test_enc['is_ftp_telnet'] *
+        df_test_enc['num_failed_logins'] / (df_test_enc['num_failed_logins'] + df_test_enc['num_compromised'] + eps)
+    )
+
+    # 3. serror_logged_cross: SYN错误率 × 登录状态 交叉项
+    df_train_enc['serror_logged_cross'] = df_train_enc['serror_rate'] * df_train_enc['logged_in']
+    df_val_enc['serror_logged_cross'] = df_val_enc['serror_rate'] * df_val_enc['logged_in']
+    df_test_enc['serror_logged_cross'] = df_test_enc['serror_rate'] * df_test_enc['logged_in']
+
+    print(f"\n[特征增强] 新增 3 个手工特征（针对 R2L/guess_passwd）:")
+    print(f"  is_ftp_telnet:       service∈{{ftp,telnet,ftp_data}} 的二元指示")
+    print(f"  svc_auth_fail_score: ftp/telnet 下的 num_failed_logins/(num_failed_logins+num_compromised+ε)")
+    print(f"  serror_logged_cross: serror_rate × logged_in 交叉项")
+
     # ========== Log1p 变换：压缩极端偏态分布 ==========
     LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration', 'hot']
     for col in LOGP1_COLS:
@@ -359,7 +396,11 @@ def encode_and_scale(df_train, df_val, df_test):
 
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_train_enc.columns]
     numeric_cols.extend(BINARY_INDICATOR_COLS)  # 纳入新增的 is_zero_* 列
-    print(f"  缩放列数: {len(numeric_cols)}（含 {len(BINARY_INDICATOR_COLS)} 个 Binary Indicator）")
+    # 纳入手工特征
+    AUTH_FEATURE_COLS = ['is_ftp_telnet', 'svc_auth_fail_score', 'serror_logged_cross']
+    numeric_cols.extend([c for c in AUTH_FEATURE_COLS if c in df_train_enc.columns])
+    print(f"  缩放列数: {len(numeric_cols)}（含 {len(BINARY_INDICATOR_COLS)} 个 Binary Indicator"
+          f" + {len(AUTH_FEATURE_COLS)} 个手工特征）")
     scaler = RobustScaler()
     scaler.fit(df_train_enc[numeric_cols])
 

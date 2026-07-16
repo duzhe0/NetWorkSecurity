@@ -89,6 +89,17 @@ train_feature_cols = [c for c in pd.read_csv(
 for col in train_feature_cols:
     if col not in df_ext_enc.columns: df_ext_enc[col] = 0.0
 
+# ===== 手工特征（与 data_preprocessing 保持一致） =====
+ftp_telnet_cols = [c for c in ['service_ftp','service_telnet','service_ftp_data']
+                   if c in df_ext_enc.columns]
+df_ext_enc['is_ftp_telnet'] = df_ext_enc[ftp_telnet_cols].max(axis=1) if ftp_telnet_cols else 0
+eps = 1e-6
+df_ext_enc['svc_auth_fail_score'] = (
+    df_ext_enc['is_ftp_telnet'] *
+    df_ext_enc['num_failed_logins'] / (df_ext_enc['num_failed_logins'] + df_ext_enc['num_compromised'] + eps)
+)
+df_ext_enc['serror_logged_cross'] = df_ext_enc['serror_rate'] * df_ext_enc['logged_in']
+
 ZERO_INFLATED_COLS = ['src_bytes','dst_bytes','duration','num_failed_logins','num_shells','num_access_files','num_file_creations','num_root']
 for col in ZERO_INFLATED_COLS:
     df_ext_enc['is_zero_'+col] = (df_ext_enc[col] == 0).astype(int)

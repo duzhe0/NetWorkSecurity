@@ -55,16 +55,16 @@ def load_two_stage_data():
         class_names = [l.strip() for l in f if l.strip()]
 
     df_train = pd.read_csv(os.path.join(train_dir, 'KDDTrain_preprocessed_train.csv'))
-    df_val = pd.read_csv(os.path.join(train_dir, 'KDDTrain_preprocessed_val.csv'))
-    df_test = pd.read_csv(os.path.join(train_dir, 'KDDTrain_preprocessed_test.csv'))
+    df_val   = pd.read_csv(os.path.join(train_dir, 'KDDTrain_preprocessed_val.csv'))
+    df_test  = pd.read_csv(os.path.join(train_dir, 'KDDTrain_preprocessed_test.csv'))
 
     exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category',
                     'label_category_encoded', 'label_multiclass', 'label_multiclass_encoded']
     feature_cols = [c for c in df_train.columns if c not in exclude_cols]
 
     X_train = df_train[feature_cols].values.astype(np.float32)
-    X_val = df_val[feature_cols].values.astype(np.float32)
-    X_test = df_test[feature_cols].values.astype(np.float32)
+    X_val   = df_val[feature_cols].values.astype(np.float32)
+    X_test  = df_test[feature_cols].values.astype(np.float32)
 
     y1_train = df_train['label_binary'].values.astype(np.int64)
     y1_val = df_val['label_binary'].values.astype(np.int64)
@@ -109,18 +109,23 @@ def load_two_stage_data():
     }
 
 
-def oversample_rare_classes(X, y, min_samples=500, noise_std=0.05):
-    """对样本数 < min_samples 的稀有类进行过采样（加小噪声防过拟合）"""
+def oversample_rare_classes(X, y, min_samples=500, noise_std=0.05, class_min_samples=None):
+    """对样本数 < min_samples 的稀有类进行过采样（加小噪声防过拟合）
+    
+    Args:
+        class_min_samples: dict, 指定特定类的 min_samples，如 {20: 200, 21: 200}
+    """
     cnt = Counter(y)
     X_list, y_list = [X], [y]
     n_added = 0
 
     for cls, count in cnt.items():
-        if count >= min_samples:
+        cls_min = class_min_samples.get(cls, min_samples) if class_min_samples else min_samples
+        if count >= cls_min:
             continue
         mask = (y == cls)
         X_cls = X[mask]
-        n_needed = min_samples - count
+        n_needed = cls_min - count
         # 重复采样 + 加高斯噪声
         idx = np.random.choice(len(X_cls), size=n_needed, replace=True)
         X_new = X_cls[idx].copy()
@@ -133,8 +138,9 @@ def oversample_rare_classes(X, y, min_samples=500, noise_std=0.05):
     if n_added > 0:
         print(f"  [过采样] 稀有类共增加 {n_added} 样本 (min_samples={min_samples})")
         for cls in sorted(cnt.keys()):
-            if cnt[cls] < min_samples:
-                print(f"    类{cls}: {cnt[cls]} -> {min_samples}")
+            cls_min = class_min_samples.get(cls, min_samples) if class_min_samples else min_samples
+            if cnt[cls] < cls_min:
+                print(f"    类{cls}: {cnt[cls]} -> {cls_min}")
         return np.vstack(X_list), np.concatenate(y_list)
     return X, y
 
@@ -450,6 +456,17 @@ def main():
             df_rest = df_rest.drop(columns=[c])
 
     df_ext_enc = pd.concat([df_rest, df_ohe], axis=1)
+
+    # ===== 手工特征工程（与 data_preprocessing 保持一致） =====
+    ftp_telnet_cols = [c for c in ['service_ftp', 'service_telnet', 'service_ftp_data']
+                       if c in df_ext_enc.columns]
+    df_ext_enc['is_ftp_telnet'] = df_ext_enc[ftp_telnet_cols].max(axis=1) if ftp_telnet_cols else 0
+    eps = 1e-6
+    df_ext_enc['svc_auth_fail_score'] = (
+        df_ext_enc['is_ftp_telnet'] *
+        df_ext_enc['num_failed_logins'] / (df_ext_enc['num_failed_logins'] + df_ext_enc['num_compromised'] + eps)
+    )
+    df_ext_enc['serror_logged_cross'] = df_ext_enc['serror_rate'] * df_ext_enc['logged_in']
 
     train_feature_cols = [c for c in pd.read_csv(
         os.path.join(train_dir, 'KDDTrain_preprocessed_train.csv'), nrows=1).columns
