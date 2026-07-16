@@ -389,13 +389,9 @@ def main():
     print("联合评估：外部 train_test 集")
     print("=" * 60)
 
-    ext_path = os.path.join(base_dir, 'Train', 'KDDTest+_20Percent.txt')
+    ext_path = os.path.join(base_dir, 'Train', 'train_test')
     if not os.path.exists(ext_path):
-        ext_path = os.path.join(base_dir, 'Train', 'KDDTest+.txt')
-    if not os.path.exists(ext_path):
-        ext_path = os.path.join(base_dir, 'Train', 'KDDTrain+_20Percent.txt')
-    if not os.path.exists(ext_path):
-        print("外部测试文件不存在，跳过")
+        print("外部测试文件 Train/train_test 不存在，跳过")
         return
 
     from models.dnn.dnn_model import CATEGORICAL_FEATURES
