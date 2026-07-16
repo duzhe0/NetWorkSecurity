@@ -6,6 +6,8 @@ import numpy as np
 import os
 import joblib
 import warnings
+import matplotlib.pyplot as plt
+import seaborn as sns
 warnings.filterwarnings('ignore')
 
 import torch
@@ -13,6 +15,9 @@ import torch.nn as nn
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score
+
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 # =============== 模型定义（与训练代码一致）===============
 class CNN1D(nn.Module):
@@ -125,6 +130,14 @@ def main():
         print(f"[标签] 类别列表: {class_names}")
     else:
         print("[标签] 未找到类别列表文件")
+    
+    # 模型输出23类，评估时扩展到24类（含unknown）
+    model_num_classes = num_classes
+    eval_num_classes = 24
+    
+    # 添加第24类unknown到class_names用于显示
+    if len(class_names) == 23:
+        class_names.append('unknown')
 
     # 4. 加载并预处理 train_test 数据
     test_path = os.path.join(base_dir, 'Train', 'train_test')
@@ -137,9 +150,12 @@ def main():
 
     # 生成多分类标签和二分类标签
     df_test['label_binary'] = df_test['label'].apply(lambda x: 0 if x == 'normal' else 1)
-    if class_names:
-        label_to_idx = {name: i for i, name in enumerate(class_names)}
-        df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(-1).astype(int)
+    
+    # 将训练集中不存在的标签编码为23（第24类-可疑流量）
+    if class_names and len(class_names) == eval_num_classes:
+        # 使用前23类进行映射，未知的映射为23（unknown）
+        label_to_idx = {name: i for i, name in enumerate(class_names[:-1])}
+        df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(eval_num_classes - 1).astype(int)
     else:
         df_test['label_multiclass_encoded'] = 0
 
@@ -171,24 +187,62 @@ def main():
 
     X_test = df_test_enc[feature_cols].values.astype(np.float32)
 
-    # 5. 模型预测
+    # 5. 模型预测（含阈值判断识别unknown）
     print("\n[预测] 开始预测...")
     X_tensor = torch.FloatTensor(X_test)
     with torch.no_grad():
         logits = model(X_tensor).numpy()
 
     exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
-    y_prob = exp_logits / exp_logits.sum(axis=1, keepdims=True)
-    y_pred = np.argmax(y_prob, axis=1)
+    y_prob_23 = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+    y_pred_23 = np.argmax(y_prob_23, axis=1)
+    max_probs = np.max(y_prob_23, axis=1)
+    
+    # 分析unknown样本的概率分布，确定合理阈值
+    unknown_mask = y_test == eval_num_classes - 1
+    if np.sum(unknown_mask) > 0:
+        unknown_max_probs = max_probs[unknown_mask]
+        print(f"[分析] unknown样本最大概率分布:")
+        print(f"  最小值: {unknown_max_probs.min():.4f}")
+        print(f"  最大值: {unknown_max_probs.max():.4f}")
+        print(f"  平均值: {unknown_max_probs.mean():.4f}")
+        print(f"  中位数: {np.median(unknown_max_probs):.4f}")
+        print(f"  前25%分位数: {np.percentile(unknown_max_probs, 25):.4f}")
+        print(f"  前75%分位数: {np.percentile(unknown_max_probs, 75):.4f}")
+    
+    known_mask = y_test != eval_num_classes - 1
+    if np.sum(known_mask) > 0:
+        known_max_probs = max_probs[known_mask]
+        print(f"[分析] 已知类别样本最大概率分布:")
+        print(f"  最小值: {known_max_probs.min():.4f}")
+        print(f"  最大值: {known_max_probs.max():.4f}")
+        print(f"  平均值: {known_max_probs.mean():.4f}")
+        print(f"  中位数: {np.median(known_max_probs):.4f}")
+    
+    # 根据分布差异设置阈值
+    threshold = 0.5
+    if np.sum(unknown_mask) > 0 and np.sum(known_mask) > 0:
+        unknown_median = np.median(unknown_max_probs)
+        known_median = np.median(known_max_probs)
+        threshold = (unknown_median + known_median) / 2
+        print(f"[阈值] 根据分布差异自动设置阈值: {threshold:.4f}")
+    
+    y_pred = y_pred_23.copy()
+    y_pred[max_probs < threshold] = eval_num_classes - 1  # 23
+    
+    # 扩展概率矩阵到24类
+    y_prob = np.zeros((len(y_test), eval_num_classes))
+    y_prob[:, :model_num_classes] = y_prob_23
+    y_prob[:, eval_num_classes - 1] = 1.0 - max_probs
 
-    # 过滤掉标签不在类别列表中的样本
-    valid_mask = y_test >= 0
-    y_test_valid = y_test[valid_mask]
-    y_pred_valid = y_pred[valid_mask]
-    y_prob_valid = y_prob[valid_mask]
-    n_dropped = int((~valid_mask).sum())
-    if n_dropped > 0:
-        print(f"[过滤] 剔除 {n_dropped} 个未知标签样本")
+    # 保留所有样本用于评估
+    y_test_valid = y_test
+    y_pred_valid = y_pred
+    y_prob_valid = y_prob
+    
+    unknown_count = np.sum(y_test == eval_num_classes - 1)
+    unknown_predicted = np.sum(y_pred == eval_num_classes - 1)
+    print(f"[评估] 阈值: {threshold}, 可疑流量（第24类）真实数: {unknown_count}, 预测数: {unknown_predicted}")
 
     # 6. 计算指标
     print("\n" + "=" * 70)
@@ -205,9 +259,26 @@ def main():
     print(f"召回率 (Recall):       {recall:.4f}")
     print(f"F1-Score:             {f1:.4f}")
 
+    # 已知类别（前23类）的准确率
+    unknown_idx = eval_num_classes - 1
+    known_mask = y_test_valid != unknown_idx
+    known_acc = accuracy_score(y_test_valid[known_mask], y_pred_valid[known_mask]) if np.sum(known_mask) > 0 else 0
+    
+    # unknown类指标
+    unknown_tp = np.sum((y_test_valid == unknown_idx) & (y_pred_valid == unknown_idx))
+    unknown_fn = np.sum((y_test_valid == unknown_idx) & (y_pred_valid != unknown_idx))
+    unknown_fp = np.sum((y_test_valid != unknown_idx) & (y_pred_valid == unknown_idx))
+    unknown_recall = unknown_tp / (unknown_tp + unknown_fn) if (unknown_tp + unknown_fn) > 0 else 0
+    unknown_precision = unknown_tp / (unknown_tp + unknown_fp) if (unknown_tp + unknown_fp) > 0 else 0
+    
+    print(f"\n[已知类别] 前23类准确率: {known_acc:.4f}")
+    print(f"[可疑流量] 第24类(unknown)真实数: {np.sum(y_test_valid == unknown_idx)}")
+    print(f"[可疑流量] 预测为可疑流量数: {np.sum(y_pred_valid == unknown_idx)}")
+    print(f"[可疑流量] unknown召回率: {unknown_recall:.4f}, 精确率: {unknown_precision:.4f}")
+
     try:
         auc = roc_auc_score(y_test_valid, y_prob_valid, multi_class='ovr',
-                            average='weighted', labels=list(range(num_classes)))
+                            average='weighted', labels=list(range(eval_num_classes)))
         print(f"AUC (OvR weighted):   {auc:.4f}")
     except Exception as e:
         print(f"AUC 计算失败: {e}")
@@ -217,7 +288,7 @@ def main():
     print("每个类别的详细表现")
     print("=" * 70)
     cr = classification_report(y_test_valid, y_pred_valid,
-                               labels=list(range(num_classes)),
+                               labels=list(range(eval_num_classes)),
                                target_names=class_names if class_names else None,
                                zero_division=0)
     print(cr)
@@ -226,7 +297,7 @@ def main():
     print("\n" + "=" * 70)
     print("混淆矩阵（行=真实，列=预测）")
     print("=" * 70)
-    cm = confusion_matrix(y_test_valid, y_pred_valid, labels=list(range(num_classes)))
+    cm = confusion_matrix(y_test_valid, y_pred_valid, labels=list(range(eval_num_classes)))
     print("标签索引:")
     if class_names:
         for i, name in enumerate(class_names):
@@ -238,6 +309,158 @@ def main():
             print(f"  {class_names[i]:15s} | {row_str}")
         else:
             print(f"  {i:15d} | {row_str}")
+
+    # 9. 可视化分析
+    print("\n" + "=" * 70)
+    print("可视化分析")
+    print("=" * 70)
+
+    cm = confusion_matrix(y_test_valid, y_pred_valid, labels=list(range(eval_num_classes)))
+
+    # 图1: 每类攻击统计（总数、正确数、错误数）
+    plt.figure(figsize=(20, 10))
+    total_per_class = np.bincount(y_test_valid, minlength=eval_num_classes)
+    correct_per_class = np.diag(cm)
+    incorrect_per_class = total_per_class - correct_per_class
+
+    x = np.arange(eval_num_classes)
+    width = 0.35
+
+    plt.bar(x - width/2, total_per_class, width, label='总数', 
+            color='#1f77b4', edgecolor='black', alpha=0.9)
+    plt.bar(x + width/2, correct_per_class, width, label='正确', 
+            color='#2ca02c', edgecolor='black', alpha=0.9)
+
+    for i, (total, correct) in enumerate(zip(total_per_class, correct_per_class)):
+        if total > 0:
+            acc = correct / total * 100
+            plt.text(i - width/2, total + max(total_per_class)*0.01, f'{total}',
+                     ha='center', va='bottom', fontsize=9, fontweight='bold')
+            plt.text(i + width/2, correct + max(total_per_class)*0.01, 
+                     f'{correct}\n({acc:.1f}%)',
+                     ha='center', va='bottom', fontsize=8, fontweight='bold',
+                     linespacing=0.8)
+
+    plt.xlabel('攻击类型', fontsize=12, fontweight='bold')
+    plt.ylabel('样本数量', fontsize=12, fontweight='bold')
+    plt.title('每类攻击测试集统计', fontsize=16, fontweight='bold')
+    plt.xticks(x, class_names if class_names else [str(i) for i in range(eval_num_classes)], 
+               rotation=45, ha='right', fontsize=10)
+    plt.yticks(fontsize=10)
+    plt.legend(fontsize=12)
+    plt.grid(True, alpha=0.3, axis='y', linestyle='--')
+    plt.tight_layout()
+    plt.savefig('eval_cnn1d_class_counts.png', dpi=300, bbox_inches='tight')
+    print("每类攻击统计图已保存: eval_cnn1d_class_counts.png")
+    plt.close()
+
+    # 图2: 误判分析（每类被误判成什么）
+    plt.figure(figsize=(24, 16))
+    plot_count = 0
+    for true_class in range(eval_num_classes):
+        if total_per_class[true_class] == 0:
+            continue
+        row = cm[true_class]
+        misclassified = row.copy()
+        misclassified[true_class] = 0
+        if misclassified.sum() == 0:
+            continue
+        plot_count += 1
+        mis_class_indices = np.where(misclassified > 0)[0]
+        mis_class_counts = misclassified[mis_class_indices]
+        mis_class_names = [class_names[i] if class_names else str(i) for i in mis_class_indices]
+        accuracy = row[true_class] / total_per_class[true_class] * 100
+
+        plt.subplot(5, 5, plot_count)
+        plt.barh(mis_class_names, mis_class_counts, 
+                 color='#ff7f0e', edgecolor='black', alpha=0.9)
+        plt.title(f'{class_names[true_class] if class_names else str(true_class)}\n(准确率: {accuracy:.1f}%, 错误: {misclassified.sum()})', 
+                  fontsize=10, fontweight='bold')
+        plt.xlabel('误判数量', fontsize=9)
+        plt.yticks(fontsize=8)
+        plt.xlim(0, max(mis_class_counts) * 1.15)
+        for i, v in enumerate(mis_class_counts):
+            plt.text(v + max(mis_class_counts)*0.02, i, f'{v}', 
+                     va='center', fontsize=8, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig('eval_cnn1d_misclassification.png', dpi=300, bbox_inches='tight')
+    print("误判分析图已保存: eval_cnn1d_misclassification.png")
+    plt.close()
+
+    # 图3: 归一化混淆矩阵
+    plt.figure(figsize=(18, 14))
+    cm_normalized = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-10)
+    sns.heatmap(cm_normalized, annot=True, fmt='.2f', cmap='YlOrRd',
+                xticklabels=class_names if class_names else [str(i) for i in range(eval_num_classes)],
+                yticklabels=class_names if class_names else [str(i) for i in range(eval_num_classes)],
+                annot_kws={'fontsize': 8, 'fontweight': 'bold'},
+                cbar_kws={'label': '比例', 'shrink': 0.8})
+    plt.title(f'CNN1D 归一化混淆矩阵 ({eval_num_classes} 类)', fontsize=16, fontweight='bold')
+    plt.xlabel('预测标签', fontsize=12, fontweight='bold')
+    plt.ylabel('真实标签', fontsize=12, fontweight='bold')
+    plt.xticks(rotation=45, ha='right', fontsize=10)
+    plt.yticks(fontsize=10)
+    plt.tight_layout()
+    plt.savefig('eval_cnn1d_confusion_normalized.png', dpi=300, bbox_inches='tight')
+    print("归一化混淆矩阵图已保存: eval_cnn1d_confusion_normalized.png")
+    plt.close()
+
+    # 图4: 每类精确率、召回率、F1
+    precisions = precision_score(y_test_valid, y_pred_valid, average=None, zero_division=0,
+                                 labels=list(range(eval_num_classes)))
+    recalls = recall_score(y_test_valid, y_pred_valid, average=None, zero_division=0,
+                           labels=list(range(eval_num_classes)))
+    f1_scores = f1_score(y_test_valid, y_pred_valid, average=None, zero_division=0,
+                         labels=list(range(eval_num_classes)))
+
+    plt.figure(figsize=(20, 10))
+    x = np.arange(eval_num_classes)
+    width = 0.25
+
+    plt.bar(x - width, precisions, width, label='精确率', color='#1f77b4', edgecolor='black')
+    plt.bar(x, recalls, width, label='召回率', color='#ff7f0e', edgecolor='black')
+    plt.bar(x + width, f1_scores, width, label='F1', color='#2ca02c', edgecolor='black')
+
+    for i in range(eval_num_classes):
+        if total_per_class[i] > 0:
+            plt.text(i - width, precisions[i] + 0.02, f'{precisions[i]:.2f}', 
+                     ha='center', va='bottom', fontsize=9, fontweight='bold')
+            plt.text(i, recalls[i] + 0.02, f'{recalls[i]:.2f}', 
+                     ha='center', va='bottom', fontsize=9, fontweight='bold')
+            plt.text(i + width, f1_scores[i] + 0.02, f'{f1_scores[i]:.2f}', 
+                     ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+    plt.xlabel('攻击类型', fontsize=12, fontweight='bold')
+    plt.ylabel('指标值', fontsize=12, fontweight='bold')
+    plt.title('每类攻击精确率、召回率、F1-Score', fontsize=16, fontweight='bold')
+    plt.xticks(x, class_names if class_names else [str(i) for i in range(eval_num_classes)], 
+               rotation=45, ha='right', fontsize=10)
+    plt.yticks(fontsize=10)
+    plt.ylim(0, 1.15)
+    plt.legend(fontsize=12)
+    plt.grid(True, alpha=0.3, axis='y', linestyle='--')
+    plt.tight_layout()
+    plt.savefig('eval_cnn1d_per_class_metrics.png', dpi=300, bbox_inches='tight')
+    print("每类指标图已保存: eval_cnn1d_per_class_metrics.png")
+    plt.close()
+
+    # 图5: 混淆矩阵热力图（含类别名称）
+    plt.figure(figsize=(16, 14))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=class_names if class_names else [str(i) for i in range(eval_num_classes)],
+                yticklabels=class_names if class_names else [str(i) for i in range(eval_num_classes)],
+                annot_kws={'fontsize': 8, 'fontweight': 'bold'},
+                cbar_kws={'label': '样本数量'})
+    plt.title(f'CNN1D 混淆矩阵 ({eval_num_classes} 类)', fontsize=16, fontweight='bold')
+    plt.xlabel('预测标签', fontsize=12, fontweight='bold')
+    plt.ylabel('真实标签', fontsize=12, fontweight='bold')
+    plt.xticks(rotation=45, ha='right', fontsize=10)
+    plt.yticks(fontsize=10)
+    plt.tight_layout()
+    plt.savefig('eval_cnn1d_confusion_matrix.png', dpi=300, bbox_inches='tight')
+    print("混淆矩阵图已保存: eval_cnn1d_confusion_matrix.png")
+    plt.close()
 
     print("\n" + "=" * 70)
     print("评估完成！")

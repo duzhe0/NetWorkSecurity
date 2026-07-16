@@ -13,6 +13,8 @@ import pickle
 import joblib
 from flask import Flask, render_template, request, jsonify, send_file
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'libs'))
+
 # PyTorch 必须在主线程导入，否则 macOS 上会 segfault（exit code 245）
 import torch
 import torch.nn as nn
@@ -23,6 +25,72 @@ from torch.utils.data import DataLoader, TensorDataset
 torch.set_num_threads(1)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models.cnn1d.cnn1d_model import CNN1D
+
+
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, alpha=None, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.reduction = reduction
+
+    def forward(self, logits, target):
+        ce_loss = nn.functional.cross_entropy(logits, target, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.alpha is not None:
+            if isinstance(self.alpha, (list, np.ndarray)):
+                alpha_t = torch.FloatTensor(self.alpha).to(target.device)[target]
+                focal_loss = alpha_t * focal_loss
+            elif isinstance(self.alpha, float):
+                focal_loss = self.alpha * focal_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        return focal_loss
+
+
+class LabelSmoothingCrossEntropy(nn.Module):
+    def __init__(self, smoothing=0.1, reduction='mean'):
+        super(LabelSmoothingCrossEntropy, self).__init__()
+        self.smoothing = smoothing
+        self.reduction = reduction
+
+    def forward(self, logits, target):
+        n_classes = logits.size(-1)
+        log_probs = nn.functional.log_softmax(logits, dim=-1)
+        one_hot = torch.zeros_like(log_probs).scatter_(1, target.unsqueeze(1), 1)
+        smooth_labels = (1 - self.smoothing) * one_hot + self.smoothing / n_classes
+        loss = (-smooth_labels * log_probs).sum(dim=-1)
+
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        return loss
+
+
+def get_loss_fn(loss_name='CrossEntropy', class_weights=None, device=None):
+    if loss_name == 'FocalLoss':
+        if class_weights is not None:
+            return FocalLoss(gamma=2.0, alpha=class_weights.tolist())
+        else:
+            return FocalLoss(gamma=2.0)
+    elif loss_name == 'LabelSmoothing':
+        return LabelSmoothingCrossEntropy(smoothing=0.1)
+    elif loss_name == 'CrossEntropyWeighted':
+        if class_weights is not None:
+            return nn.CrossEntropyLoss(weight=class_weights.to(device))
+        else:
+            return nn.CrossEntropyLoss()
+    else:
+        return nn.CrossEntropyLoss()
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'network_security_key'
@@ -45,38 +113,6 @@ class DNNMultiClass(nn.Module):
 
     def forward(self, x):
         return self.network(x)
-
-
-# 预定义 1D-CNN 模型类（模块级别）
-class CNN1DMultiClass(nn.Module):
-    def __init__(self, input_dim, num_classes, conv_channels=(64, 128, 256),
-                 kernel_size=3, dropout_rate=0.3):
-        super(CNN1DMultiClass, self).__init__()
-        layers = []
-        in_ch = 1
-        for out_ch in conv_channels:
-            layers.append(nn.Conv1d(in_ch, out_ch, kernel_size, padding=kernel_size // 2))
-            layers.append(nn.BatchNorm1d(out_ch))
-            layers.append(nn.ReLU())
-            layers.append(nn.MaxPool1d(2))
-            layers.append(nn.Dropout(dropout_rate))
-            in_ch = out_ch
-        self.conv = nn.Sequential(*layers)
-        self.gap = nn.AdaptiveAvgPool1d(1)
-        self.classifier = nn.Sequential(
-            nn.Linear(conv_channels[-1], 64),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(64, num_classes)
-        )
-
-    def forward(self, x):
-        # x: (batch, input_dim) -> (batch, 1, input_dim)
-        if x.dim() == 2:
-            x = x.unsqueeze(1)
-        x = self.conv(x)
-        x = self.gap(x).squeeze(-1)
-        return self.classifier(x)
 
 
 # 预定义 Transformer 模型类（模块级别）
@@ -318,6 +354,17 @@ def get_data_distribution():
 def train_model():
     model_name = request.json.get('model_name')
     granularity = request.json.get('granularity', '23')
+    loss_fn_name = request.json.get('loss_fn', 'CrossEntropy')
+    
+    epochs = int(request.json.get('epochs', 50))
+    batch_size = int(request.json.get('batch_size', 64))
+    learning_rate = float(request.json.get('learning_rate', 0.001))
+    dropout_rate = float(request.json.get('dropout_rate', 0.3))
+    
+    xgb_n_estimators = int(request.json.get('xgb_n_estimators', 200))
+    xgb_max_depth = int(request.json.get('xgb_max_depth', 8))
+    xgb_learning_rate = float(request.json.get('xgb_learning_rate', 0.1))
+    
     if granularity not in ('5', '23'):
         return jsonify({'status': 'error', 'message': '无效的分类粒度，仅支持 5 或 23'})
     task_key = f'{model_name}_{granularity}'
@@ -434,9 +481,9 @@ def train_model():
                 update_progress(task_key, 12)
 
                 params = {
-                    'n_estimators': 200,
-                    'max_depth': 8,
-                    'learning_rate': 0.1,
+                    'n_estimators': xgb_n_estimators,
+                    'max_depth': xgb_max_depth,
+                    'learning_rate': xgb_learning_rate,
                     'objective': 'multi:softprob',
                     'num_class': num_classes,
                     'eval_metric': 'mlogloss',
@@ -446,7 +493,7 @@ def train_model():
                     'tree_method': 'hist'
                 }
 
-                add_message(task_key,f'XGBoost ({granularity} 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, num_class={params["num_class"]}')
+                add_message(task_key,f'XGBoost ({granularity} 分类) 参数: n_estimators={params["n_estimators"]}, max_depth={params["max_depth"]}, lr={params["learning_rate"]}, num_class={params["num_class"]}')
                 add_message(task_key,'开始训练（eval_set 使用验证集，非测试集）...')
                 update_progress(task_key, 20)
 
@@ -468,10 +515,14 @@ def train_model():
                 add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
-                model = DNNMultiClass(input_dim, num_classes).to(device)
-                # 多分类使用 CrossEntropyLoss
-                criterion = nn.CrossEntropyLoss()
-                optimizer = optim.Adam(model.parameters(), lr=0.001)
+                model = DNNMultiClass(input_dim, num_classes, dropout_rate=dropout_rate).to(device)
+
+                from sklearn.utils.class_weight import compute_class_weight
+                class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+                class_weights_tensor = torch.FloatTensor(class_weights).to(device)
+
+                criterion = get_loss_fn(loss_fn_name, class_weights_tensor, device)
+                optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
                 X_train_tensor = torch.FloatTensor(X_train).to(device)
                 y_train_tensor = torch.LongTensor(y_train).to(device)
@@ -479,14 +530,14 @@ def train_model():
                 y_val_tensor = torch.LongTensor(y_val).to(device)
 
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-                train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-                add_message(task_key,f'【DNN 多分类】输出维度={num_classes}, loss=CrossEntropyLoss')
+                add_message(task_key,f'【DNN 多分类】输出维度={num_classes}, epochs={epochs}, batch_size={batch_size}, lr={learning_rate}, dropout={dropout_rate}, loss={loss_fn_name}')
                 add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
                 update_progress(task_key, 12)
                 start_time = time.time()
                 
-                for epoch in range(50):
+                for epoch in range(epochs):
                     model.train()
                     epoch_loss = 0
                     for batch_X, batch_y in train_loader:
@@ -497,14 +548,13 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
                     
-                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / epochs * 76))
 
-                    if (epoch + 1) % 10 == 0:
-                        # 在验证集上计算 loss（非测试集）
+                    if (epoch + 1) % max(1, epochs // 5) == 0:
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/{epochs}] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
                 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -515,9 +565,15 @@ def train_model():
                 add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
-                model = CNN1DMultiClass(input_dim, num_classes).to(device)
-                criterion = nn.CrossEntropyLoss()
-                optimizer = optim.Adam(model.parameters(), lr=0.001)
+                model = CNN1D(input_dim, num_classes, dropout_rate=dropout_rate).to(device)
+
+                from sklearn.utils.class_weight import compute_class_weight
+                class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+                if len(class_weights) < num_classes:
+                    class_weights = np.pad(class_weights, (0, num_classes - len(class_weights)), mode='constant')
+                class_weights_tensor = torch.FloatTensor(class_weights).to(device)
+                criterion = get_loss_fn(loss_fn_name, class_weights_tensor, device)
+                optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
                 X_train_tensor = torch.FloatTensor(X_train).to(device)
                 y_train_tensor = torch.LongTensor(y_train).to(device)
@@ -525,14 +581,14 @@ def train_model():
                 y_val_tensor = torch.LongTensor(y_val).to(device)
 
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-                train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-                add_message(task_key,f'【1D-CNN 多分类】输入序列长度={input_dim}, 输出维度={num_classes}, loss=CrossEntropyLoss')
+                add_message(task_key,f'【1D-CNN 多分类】输入序列长度={input_dim}, 输出维度={num_classes}, epochs={epochs}, batch_size={batch_size}, lr={learning_rate}, dropout={dropout_rate}, loss={loss_fn_name}')
                 add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
                 update_progress(task_key, 12)
                 start_time = time.time()
 
-                for epoch in range(50):
+                for epoch in range(epochs):
                     model.train()
                     epoch_loss = 0
                     for batch_X, batch_y in train_loader:
@@ -543,13 +599,13 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
-                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / epochs * 76))
 
-                    if (epoch + 1) % 10 == 0:
+                    if (epoch + 1) % max(1, epochs // 5) == 0:
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/{epochs}] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -560,9 +616,13 @@ def train_model():
                 add_message(task_key,f'使用设备: {device}')
 
                 input_dim = X_train.shape[1]
-                model = TransformerMultiClass(input_dim, num_classes).to(device)
-                criterion = nn.CrossEntropyLoss()
-                optimizer = optim.Adam(model.parameters(), lr=0.001)
+                model = TransformerMultiClass(input_dim, num_classes, dropout_rate=dropout_rate).to(device)
+
+                from sklearn.utils.class_weight import compute_class_weight
+                class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+                class_weights_tensor = torch.FloatTensor(class_weights).to(device)
+                criterion = get_loss_fn(loss_fn_name, class_weights_tensor, device)
+                optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
                 X_train_tensor = torch.FloatTensor(X_train).to(device)
                 y_train_tensor = torch.LongTensor(y_train).to(device)
@@ -570,14 +630,14 @@ def train_model():
                 y_val_tensor = torch.LongTensor(y_val).to(device)
 
                 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-                train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-                add_message(task_key,f'【Transformer 多分类】token数={input_dim}, d_model=64, 输出维度={num_classes}, loss=CrossEntropyLoss')
+                add_message(task_key,f'【Transformer 多分类】token数={input_dim}, d_model=64, 输出维度={num_classes}, epochs={epochs}, batch_size={batch_size}, lr={learning_rate}, dropout={dropout_rate}, loss={loss_fn_name}')
                 add_message(task_key,'开始训练（epoch 监控使用验证集，非测试集）...')
                 update_progress(task_key, 12)
                 start_time = time.time()
 
-                for epoch in range(50):
+                for epoch in range(epochs):
                     model.train()
                     epoch_loss = 0
                     for batch_X, batch_y in train_loader:
@@ -588,13 +648,13 @@ def train_model():
                         optimizer.step()
                         epoch_loss += loss.item()
 
-                    update_progress(task_key, 12 + int((epoch + 1) / 50 * 76))
+                    update_progress(task_key, 12 + int((epoch + 1) / epochs * 76))
 
-                    if (epoch + 1) % 10 == 0:
+                    if (epoch + 1) % max(1, epochs // 5) == 0:
                         model.eval()
                         with torch.no_grad():
                             val_loss = criterion(model(X_val_tensor), y_val_tensor).item()
-                        add_message(task_key,f'Epoch [{epoch+1}/50] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
+                        add_message(task_key,f'Epoch [{epoch+1}/{epochs}] - Train Loss: {epoch_loss/len(train_loader):.4f} - Val Loss: {val_loss:.4f}')
 
                 train_time = time.time() - start_time
                 update_progress(task_key, 88)
@@ -785,7 +845,8 @@ def get_feature_importance(model_name):
         data_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Train', 'KDDTrain_preprocessed_train.csv')
         df = pd.read_csv(data_path)
         
-        exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded']
+        exclude_cols = ['label', 'difficulty', 'label_binary', 'label_category', 'label_category_encoded',
+                        'label_multiclass', 'label_multiclass_encoded']
         feature_cols = [col for col in df.columns if col not in exclude_cols]
         
         importance = model.feature_importances_
@@ -886,6 +947,11 @@ def test_model():
             if os.path.exists(class_file):
                 with open(class_file, 'r') as f:
                     class_names = [line.strip() for line in f if line.strip()]
+                # 补充unknown为第24类（用于23分类模型的阈值开集识别评估）
+                eval_num_classes = len(class_names)
+                if granularity != '5' and 'unknown' not in class_names:
+                    class_names.append('unknown')
+                    eval_num_classes = len(class_names)
                 label_to_idx = {name: i for i, name in enumerate(class_names)}
                 if granularity == '5':
                     # 5 类：原始攻击先经 ATTACK_CATEGORIES 归到 5 大类，再映射到索引
@@ -893,8 +959,9 @@ def test_model():
                         lambda x: ATTACK_CATEGORIES.get(x, 'normal')).map(label_to_idx).fillna(
                         label_to_idx.get('normal', 0)).astype(int)
                 else:
-                    # 未知标签(训练集23类之外的新攻击)映射为 -1，评估时剔除，与 eval_*_train_test.py 对齐
-                    df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(-1).astype(int)
+                    # 未知标签映射为unknown索引（24类中的最后一类），与eval脚本对齐
+                    unknown_idx = eval_num_classes - 1
+                    df_test['label_multiclass_encoded'] = df_test['label'].map(label_to_idx).fillna(unknown_idx).astype(int)
             else:
                 if granularity == '5':
                     # 5 类编码器不存在：动态从训练集 label_category 列构建映射
@@ -911,6 +978,8 @@ def test_model():
             
             y_test = df_test['label_multiclass_encoded'].values
             unique_labels, label_counts = np.unique(y_test, return_counts=True)
+            add_message(task_key, f'[DEBUG] 步骤1-标签编码后: y_test形状={y_test.shape}, 样本数={len(y_test)}, 类别数={len(unique_labels)}')
+            add_message(task_key, f'[DEBUG] 标签分布: {dict(zip(unique_labels, label_counts))}')
             add_message(task_key, f'测试集多分类标签分布: {len(unique_labels)} 个类别, 样本数={len(y_test)}')
             update_progress(task_key, 25)
             
@@ -920,6 +989,7 @@ def test_model():
             df_ohe = pd.DataFrame(ohe_array, columns=ohe_feature_names, index=df_test.index)
             df_rest = df_test.drop(columns=CATEGORICAL_FEATURES)
             df_test_enc = pd.concat([df_rest, df_ohe], axis=1)
+            add_message(task_key, f'[DEBUG] 步骤2-OHE后: df_test_enc形状={df_test_enc.shape}')
             
             # 补齐列（训练集可能有一些测试集没有的类别）
             train_feature_cols = None
@@ -934,7 +1004,7 @@ def test_model():
                 for col in train_feature_cols:
                     if col not in df_test_enc.columns:
                         df_test_enc[col] = 0.0
-                df_test_enc = df_test_enc[train_feature_cols + ['label_binary']]
+                df_test_enc = df_test_enc[train_feature_cols + ['label_binary', 'label_multiclass_encoded']]
             
             # 标准化（使用训练时 fit 的标准化器）
             numeric_cols = [col for col in NUMERIC_FEATURES if col in df_test_enc.columns]
@@ -955,6 +1025,7 @@ def test_model():
                 feature_cols = [col for col in df_test_enc.columns if col not in exclude_cols]
                 X_test = df_test_enc[feature_cols].values.astype(np.float32)
             
+            add_message(task_key, f'[DEBUG] 步骤3-特征矩阵: X_test形状={X_test.shape}, y_test形状={y_test.shape}, 行数一致={X_test.shape[0] == y_test.shape[0]}')
             add_message(task_key, f'测试特征矩阵: {X_test.shape}')
             
             # 加载模型
@@ -990,7 +1061,7 @@ def test_model():
                 elif model_name == 'cnn1d':
                     # CNN1D 的 conv 权重不依赖 input_dim，只需推断 num_classes
                     num_classes = state_dict['classifier.3.weight'].shape[0]
-                    model = CNN1DMultiClass(input_dim=1, num_classes=num_classes).to(device)
+                    model = CNN1D(input_dim=X_test.shape[1], num_classes=num_classes).to(device)
                 else:  # transformer
                     # input_dim 从 pos_embedding shape 推断
                     input_dim = state_dict['pos_embedding'].shape[1]
@@ -1006,31 +1077,100 @@ def test_model():
                 exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
                 y_prob_matrix = exp_logits / exp_logits.sum(axis=1, keepdims=True)
 
-                # 多分类预测
+                # 开集识别：阈值判断，低于阈值归为unknown（仅23分类粒度）
+                max_probs = np.max(y_prob_matrix, axis=1)
                 y_pred = np.argmax(y_prob_matrix, axis=1)
+
+                if granularity != '5' and 'unknown' in class_names:
+                    model_num_classes = y_prob_matrix.shape[1]  # 模型实际输出类别数
+                    # 扩展概率矩阵到24类
+                    y_prob_ext = np.zeros((len(y_prob_matrix), eval_num_classes))
+                    y_prob_ext[:, :model_num_classes] = y_prob_matrix
+                    y_prob_ext[:, eval_num_classes - 1] = 1.0 - max_probs
+
+                    # 分析概率分布，自动调整阈值
+                    u_idx = eval_num_classes - 1
+                    unknown_mask = y_test == u_idx
+                    known_mask = y_test != u_idx
+                    if np.sum(unknown_mask) > 0 and np.sum(known_mask) > 0:
+                        unknown_median = np.median(max_probs[unknown_mask])
+                        known_median = np.median(max_probs[known_mask])
+                        threshold = (unknown_median + known_median) / 2
+                    else:
+                        threshold = 0.5
+
+                    y_pred[max_probs < threshold] = u_idx
+                    y_prob_matrix = y_prob_ext
+                    add_message(task_key, f'开集识别阈值: {threshold:.4f}, unknown真实数: {int(np.sum(unknown_mask))}, 预测数: {int(np.sum(y_pred == u_idx))}')
+                else:
+                    eval_num_classes = y_prob_matrix.shape[1]
 
             elif model_name == 'xgboost':
                 model = joblib.load(model_path)
                 # 新版 XGBoost 在训练阶段已通过零权重虚拟样本补齐到 num_classes(=23) 类，
                 # 预测空间与编码空间直接一致，无需任何标签重编码。
-                y_pred = model.predict(X_test).astype(np.int64)
+                y_pred_raw = model.predict(X_test).astype(np.int64)
                 y_prob_matrix = model.predict_proba(X_test)
                 num_classes = model.n_classes_ if hasattr(model, 'n_classes_') else y_prob_matrix.shape[1]
+
+                # 开集识别：阈值判断
+                max_probs = np.max(y_prob_matrix, axis=1)
+                y_pred = y_pred_raw.copy()
+                if granularity != '5' and 'unknown' in class_names:
+                    model_num_classes = y_prob_matrix.shape[1]
+                    y_prob_ext = np.zeros((len(y_prob_matrix), eval_num_classes))
+                    y_prob_ext[:, :model_num_classes] = y_prob_matrix
+                    y_prob_ext[:, eval_num_classes - 1] = 1.0 - max_probs
+
+                    u_idx = eval_num_classes - 1
+                    unknown_mask = y_test == u_idx
+                    known_mask = y_test != u_idx
+                    if np.sum(unknown_mask) > 0 and np.sum(known_mask) > 0:
+                        unknown_median = np.median(max_probs[unknown_mask])
+                        known_median = np.median(max_probs[known_mask])
+                        threshold = (unknown_median + known_median) / 2
+                    else:
+                        threshold = 0.5
+
+                    y_pred[max_probs < threshold] = u_idx
+                    y_prob_matrix = y_prob_ext
+                    add_message(task_key, f'开集识别阈值: {threshold:.4f}, unknown真实数: {int(np.sum(unknown_mask))}, 预测数: {int(np.sum(y_pred == u_idx))}')
+                else:
+                    eval_num_classes = y_prob_matrix.shape[1]
 
             add_message(task_key, f'预测完成')
             update_progress(task_key, 75)
 
-            # 与 eval_*_train_test.py 对齐：剔除测试集中未知标签(-1)的样本，
-            # 这些样本属于训练集 23 类之外的新攻击类型，无法做多分类评估。
-            valid_mask = y_test >= 0
-            n_dropped = int((~valid_mask).sum())
-            if n_dropped > 0:
-                add_message(task_key, f'注: 测试集中 {n_dropped} 个样本标签不在训练集 23 类中，评估时已剔除')
-                y_test = y_test[valid_mask]
-                y_pred = y_pred[valid_mask]
-                y_prob_matrix = y_prob_matrix[valid_mask]
+            # 兜底：确保 eval_num_classes 已定义
+            if 'eval_num_classes' not in dir():
+                eval_num_classes = y_prob_matrix.shape[1]
+            if 'class_names' not in dir():
+                class_names = []
 
-            # 所有模型均为 23 分类任务，统一使用多分类评估指标
+            # 不计入所有样本，包括unknown类
+            unknown_metrics = {}
+            if granularity != '5' and 'unknown' in class_names:
+                u_idx = eval_num_classes - 1
+                unknown_real = int(np.sum(y_test == u_idx))
+                unknown_pred = int(np.sum(y_pred == u_idx))
+                unknown_tp = int(np.sum((y_test == u_idx) & (y_pred == u_idx)))
+                unknown_recall = unknown_tp / unknown_real if unknown_real > 0 else 0.0
+                unknown_precision = unknown_tp / unknown_pred if unknown_pred > 0 else 0.0
+                unknown_metrics = {
+                    'unknown_real': unknown_real,
+                    'unknown_pred': unknown_pred,
+                    'unknown_tp': unknown_tp,
+                    'unknown_recall': round(unknown_recall, 4),
+                    'unknown_precision': round(unknown_precision, 4)
+                }
+                add_message(task_key, f'[unknown] 真实数: {unknown_real}, 预测数: {unknown_pred}, TP: {unknown_tp}')
+                add_message(task_key, f'[unknown] 召回率: {unknown_recall:.4f}, 精确率: {unknown_precision:.4f}')
+                # 已知23类准确率
+                known_mask = y_test != u_idx
+                known_acc = accuracy_score(y_test[known_mask], y_pred[known_mask])
+                add_message(task_key, f'[已知类别] 前23类准确率: {known_acc:.4f}')
+
+            # 所有模型均为多分类任务，统一使用多分类评估指标
             accuracy = accuracy_score(y_test, y_pred)
             precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
             recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
@@ -1054,8 +1194,8 @@ def test_model():
                     auc = np.mean(aucs) if aucs else float('nan')
                 except Exception:
                     auc = float('nan')
-            cm = confusion_matrix(y_test, y_pred, labels=list(range(num_classes))).tolist()
-            add_message(task_key, f'测试集评估结果（多分类 {num_classes} 类）:')
+            cm = confusion_matrix(y_test, y_pred, labels=list(range(eval_num_classes))).tolist()
+            add_message(task_key, f'测试集评估结果（多分类 {eval_num_classes} 类）:')
             add_message(task_key, f'  准确率: {accuracy:.4f}')
             add_message(task_key, f'  精确率 (weighted): {precision:.4f}')
             add_message(task_key, f'  召回率 (weighted): {recall:.4f}')
@@ -1072,8 +1212,11 @@ def test_model():
                 'auc': auc,
                 'confusion_matrix': cm,
                 'test_file': test_file,
-                'test_samples': len(y_test)
+                'test_samples': len(y_test),
+                'num_classes': eval_num_classes
             }
+            if unknown_metrics:
+                test_results['unknown_metrics'] = unknown_metrics
             
             results_path = os.path.join(model_dir, f'results_{model_name}_{granularity}_external_test.csv')
             pd.DataFrame([test_results]).to_csv(results_path, index=False)
@@ -1125,22 +1268,29 @@ def get_test_results(model_name):
         
         df = pd.read_csv(results_path)
         
+        result_data = {
+            'accuracy': float(df['test_acc'].values[0]),
+            'precision': float(df['precision'].values[0]),
+            'recall': float(df['recall'].values[0]),
+            'f1': float(df['f1'].values[0]),
+            'auc': float(df['auc'].values[0]),
+            'test_samples': int(df['test_samples'].values[0]),
+            'test_file': df['test_file'].values[0] if 'test_file' in df.columns else 'unknown',
+            'confusion_matrix': eval(df['confusion_matrix'].values[0]) if 'confusion_matrix' in df.columns else []
+        }
+        if 'unknown_metrics' in df.columns:
+            try:
+                result_data['unknown_metrics'] = eval(df['unknown_metrics'].values[0])
+            except Exception:
+                pass
+        
         return jsonify({
             'status': 'success',
-            'results': {
-                'accuracy': float(df['test_acc'].values[0]),
-                'precision': float(df['precision'].values[0]),
-                'recall': float(df['recall'].values[0]),
-                'f1': float(df['f1'].values[0]),
-                'auc': float(df['auc'].values[0]),
-                'test_samples': int(df['test_samples'].values[0]),
-                'test_file': df['test_file'].values[0] if 'test_file' in df.columns else 'unknown',
-                'confusion_matrix': eval(df['confusion_matrix'].values[0]) if 'confusion_matrix' in df.columns else []
-            }
+            'results': result_data
         })
     
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5009, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
