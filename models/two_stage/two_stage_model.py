@@ -34,19 +34,168 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # ==================== Stage 1: Binary Classifier ====================
 
 class BinaryDNN(nn.Module):
-    """Stage 1: normal vs attack"""
-    def __init__(self, input_dim, hidden_dims=[128, 64], dropout=0.3):
+    """Stage 1: normal vs attack
+    支持残差连接和 Swish 激活，在不加深的前提下增大模型容量
+    """
+    def __init__(self, input_dim, hidden_dims=[256, 128], dropout=0.3,
+                 use_residual=True, activation='silu'):
         super().__init__()
-        layers = []
-        prev = input_dim
-        for h in hidden_dims:
-            layers.extend([nn.Linear(prev, h), nn.BatchNorm1d(h), nn.ReLU(), nn.Dropout(dropout)])
-            prev = h
-        layers.append(nn.Linear(prev, 2))
-        self.net = nn.Sequential(*layers)
+        self.use_residual = use_residual
+        self.dropout = nn.Dropout(dropout)
+        act_fn = nn.SiLU() if activation == 'silu' else nn.ReLU()
+
+        self.fc1 = nn.Linear(input_dim, hidden_dims[0])
+        self.bn1 = nn.BatchNorm1d(hidden_dims[0])
+        self.act1 = act_fn if not isinstance(act_fn, nn.ReLU) else nn.ReLU()
+
+        self.fc2 = nn.Linear(hidden_dims[0], hidden_dims[1])
+        self.bn2 = nn.BatchNorm1d(hidden_dims[1])
+        self.act2 = nn.SiLU() if activation == 'silu' else nn.ReLU()
+
+        self.fc_out = nn.Linear(hidden_dims[1], 2)
+
+        # 残差投影：当 input_dim ≠ hidden_dims[0] 时做维度对齐
+        if use_residual and input_dim != hidden_dims[0]:
+            self.proj1 = nn.Linear(input_dim, hidden_dims[0])
+        elif use_residual:
+            self.proj1 = nn.Identity()
+        else:
+            self.proj1 = None
 
     def forward(self, x):
-        return self.net(x)
+        # Block 1: Linear → BN → Act → Dropout, + residual
+        out = self.fc1(x)
+        out = self.bn1(out)
+        out = self.act1(out)
+        out = self.dropout(out)
+        if self.use_residual:
+            out = out + self.proj1(x)
+
+        # Block 2: Linear → BN → Act → Dropout
+        out = self.fc2(out)
+        out = self.bn2(out)
+        out = self.act2(out)
+        out = self.dropout(out)
+
+        return self.fc_out(out)
+
+
+# ==================== Stage 1 替代方案: Dense Autoencoder ====================
+
+class DenseAutoencoder(nn.Module):
+    """Dense Autoencoder：仅用 normal 数据训练，攻击样本重构误差更高。
+    forward() 返回 [normal_score, attack_score]，与 BinaryDNN 接口兼容。
+    """
+    def __init__(self, input_dim, hidden_dims=[64, 32], latent_dim=16):
+        super().__init__()
+        self.recon_threshold = 0.0  # 训练后设定
+
+        # Encoder: input_dim → 64 → 32 → latent_dim
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dims[0]),
+            nn.BatchNorm1d(hidden_dims[0]),
+            nn.ReLU(),
+            nn.Linear(hidden_dims[0], hidden_dims[1]),
+            nn.BatchNorm1d(hidden_dims[1]),
+            nn.ReLU(),
+            nn.Linear(hidden_dims[1], latent_dim),
+        )
+        # Decoder: latent_dim → 32 → 64 → input_dim
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dims[1]),
+            nn.BatchNorm1d(hidden_dims[1]),
+            nn.ReLU(),
+            nn.Linear(hidden_dims[1], hidden_dims[0]),
+            nn.BatchNorm1d(hidden_dims[0]),
+            nn.ReLU(),
+            nn.Linear(hidden_dims[0], input_dim),
+        )
+
+    def forward(self, x):
+        """返回 [normal_score, attack_score]，兼容 two_stage_predict"""
+        x_recon = self.decoder(self.encoder(x))
+        recon_error = ((x - x_recon) ** 2).mean(dim=1)  # (batch,)
+        # steep sigmoid: recon_error > threshold → attack_prob ≈ 1
+        attack_prob = torch.sigmoid((recon_error - self.recon_threshold) * 50.0)
+        return torch.stack([1 - attack_prob, attack_prob], dim=1)
+
+    def compute_recon_error(self, x):
+        """返回原始重构误差（用于阈值拟合）"""
+        with torch.no_grad():
+            x_recon = self.decoder(self.encoder(x))
+            return ((x - x_recon) ** 2).mean(dim=1)
+
+
+def train_autoencoder(model, X_train, y_train, X_val, y_val, epochs=50, batch_size=128):
+    """训练 Autoencoder：仅用 normal 样本，最小化重构误差"""
+    normal_mask_train = (y_train == 0)
+    normal_mask_val = (y_val == 0)
+    Xn_train = X_train[normal_mask_train]
+    Xn_val = X_val[normal_mask_val]
+    print(f"  AE 训练: 仅用 normal 样本 train={len(Xn_train)}, val={len(Xn_val)}")
+
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+
+    Xt = torch.FloatTensor(Xn_train).to(device)
+    Xv = torch.FloatTensor(Xn_val).to(device)
+
+    ae = model.base_model  # ServiceEmbeddingModel 包裹的 DenseAutoencoder
+
+    def embed(x):
+        """应用 Service Embedding，返回 embedded_dim 的特征"""
+        service_ids = x[:, model._service_idx].long()
+        emb = model.embedding(service_ids)
+        return torch.cat([x[:, model._other_indices], emb], dim=1)
+
+    best_loss = float('inf')
+    best_state = None
+    for epoch in range(1, epochs + 1):
+        model.train()
+        for i in range(0, len(Xt), batch_size):
+            bx = Xt[i:i + batch_size]
+            bx_emb = embed(bx)
+            x_recon = ae.decoder(ae.encoder(bx_emb))
+            loss = criterion(x_recon, bx_emb)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            x_recon_val = ae.decoder(ae.encoder(embed(Xv)))
+            val_loss = criterion(x_recon_val, embed(Xv)).item()
+        scheduler.step(val_loss)
+
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+        if epoch % 10 == 0:
+            print(f"  AE Epoch {epoch:2d}/{epochs} - Val MSE: {val_loss:.6f}")
+
+    model.load_state_dict(best_state)
+
+    # 拟合阈值：基于验证集 normal 样本的重构误差
+    model.eval()
+    with torch.no_grad():
+        Xv_all = torch.FloatTensor(X_val).to(device)
+        Xv_emb = embed(Xv_all)
+        recon_all = ae.compute_recon_error(Xv_emb).cpu().numpy()
+        normal_errors = recon_all[y_val == 0]
+        attack_errors = recon_all[y_val == 1]
+
+    # 使用 normal 的 mean + k*std 作为阈值
+    threshold = float(np.mean(normal_errors) + 3.0 * np.std(normal_errors))
+    ae.recon_threshold = threshold
+
+    n_attack_above = int((attack_errors >= threshold).sum())
+    print(f"  AE 阈值: normal_mean={np.mean(normal_errors):.6f} + 3*std={np.std(normal_errors):.6f}"
+          f" = {threshold:.6f}")
+    print(f"  AE 验证集: {n_attack_above}/{len(attack_errors)} 攻击样本超过阈值"
+          f" ({n_attack_above/max(len(attack_errors),1)*100:.1f}%)")
+    return best_loss
 
 
 def load_two_stage_data():
@@ -148,13 +297,17 @@ def oversample_rare_classes(X, y, min_samples=500, noise_std=0.05, class_min_sam
 # ==================== 训练函数 ====================
 
 def train_stage1(model, X_train, y_train, X_val, y_val, epochs=30, batch_size=128):
-    """训练 Stage 1 二分类"""
+    """训练 Stage 1 二分类，使用 FocalLoss 聚焦难分样本（guess_passwd/unknown_attack）"""
     n_normal = (y_train == 0).sum()
     n_attack = (y_train == 1).sum()
     w0 = len(y_train) / (2 * n_normal)
     w1 = len(y_train) / (2 * n_attack)
-    class_weights = torch.tensor([w0, w1], device=device, dtype=torch.float32)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    # 攻击类权重翻倍：加大对 attack→normal 误判的惩罚
+    ATTACK_WEIGHT_BOOST = 2.0
+    class_weights = [w0, w1 * ATTACK_WEIGHT_BOOST]
+    alpha = torch.tensor(class_weights, device=device, dtype=torch.float32)
+    criterion = FocalLoss(alpha=alpha, gamma=1.0)
+    print(f"  Stage1 Loss: FocalLoss(gamma=1.0, alpha=[{class_weights[0]:.2f}, {class_weights[1]:.2f}])")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
@@ -337,18 +490,38 @@ def main():
     class_names = data['class_names']
     print(f"特征列: {len(feature_cols)}")
 
-    # ===== Stage 1: Binary DNN =====
-    print(f"\n--- Stage 1: 二分类 (normal vs attack) ---")
+    # ===== Stage 1: Dense Autoencoder (anomaly detection) =====
+    USE_AUTOENCODER = False  # AE 效果差（攻击检测率仅4%），回退 BinaryDNN
+    print(f"\n--- Stage 1: {'Dense Autoencoder (异常检测)' if USE_AUTOENCODER else '二分类 (normal vs attack)'} ---")
     print(f"  训练集: {len(data['X_train'])} (normal={int((data['y1_train']==0).sum())}, attack={int((data['y1_train']==1).sum())})")
 
     embedded_dim = compute_embedded_input_dim(feature_cols, SERVICE_EMBEDDING_DIM)
-    s1_base = BinaryDNN(embedded_dim, hidden_dims=[128, 64], dropout=0.3)
-    model_s1 = ServiceEmbeddingModel(s1_base, vocab_size=69,
-                                      feature_cols=feature_cols).to(device)
 
-    s1_acc = train_stage1(model_s1, data['X_train'], data['y1_train'],
-                          data['X_val'], data['y1_val'], epochs=30)
-    print(f"  Stage1 最佳 Val Acc: {s1_acc:.4f}")
+    if USE_AUTOENCODER:
+        s1_base = DenseAutoencoder(embedded_dim, hidden_dims=[64, 32], latent_dim=16)
+        model_s1 = ServiceEmbeddingModel(s1_base, vocab_size=69,
+                                          feature_cols=feature_cols).to(device)
+
+        _ = train_autoencoder(model_s1, data['X_train'], data['y1_train'],
+                              data['X_val'], data['y1_val'], epochs=50)
+
+        # 验证集上评估 AE 的二分类能力
+        Xv_t = torch.FloatTensor(data['X_val']).to(device)
+        model_s1.eval()
+        with torch.no_grad():
+            s1_val_out = model_s1(Xv_t)
+            s1_val_pred = s1_val_out.argmax(1).cpu().numpy()
+        s1_val_acc = accuracy_score(data['y1_val'], s1_val_pred)
+        print(f"  AE 验证集二分类 Acc: {s1_val_acc:.4f}")
+    else:
+        s1_base = BinaryDNN(embedded_dim, hidden_dims=[128, 64], dropout=0.3,
+                            use_residual=False, activation='relu')
+        model_s1 = ServiceEmbeddingModel(s1_base, vocab_size=69,
+                                          feature_cols=feature_cols).to(device)
+
+        s1_acc = train_stage1(model_s1, data['X_train'], data['y1_train'],
+                              data['X_val'], data['y1_val'], epochs=30)
+        print(f"  Stage1 最佳 Val Acc: {s1_acc:.4f}")
 
     Xt_test = torch.FloatTensor(data['X_test']).to(device)
     model_s1.eval()
@@ -488,8 +661,13 @@ def main():
 
     numeric_cols = [c for c in train_feature_cols
                     if not (c.startswith('protocol_type_') or c.startswith('service_') or c.startswith('flag_'))]
-    scaler_cols = [c for c in numeric_cols if c in df_ext_enc.columns]
+    # 二值特征不参与RobustScaler，改为手动映射 0→-3, 1→+3
+    binary_cols = [c for c in numeric_cols if c.startswith('is_zero_') or c.startswith('is_ftp_telnet') or c == 'is_failed_login']
+    scaler_cols = [c for c in numeric_cols if c in df_ext_enc.columns and c not in binary_cols]
     df_ext_enc[scaler_cols] = scaler.transform(df_ext_enc[scaler_cols])
+    for col in binary_cols:
+        if col in df_ext_enc.columns:
+            df_ext_enc[col] = df_ext_enc[col] * 6 - 3
 
     X_ext = df_ext_enc[train_feature_cols].values.astype(np.float32)
     print(f"[外部数据] 预处理完成，特征矩阵: {X_ext.shape}")

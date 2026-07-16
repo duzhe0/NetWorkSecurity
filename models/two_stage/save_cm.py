@@ -41,7 +41,8 @@ exclude_cols = ['label','difficulty','label_binary','label_category','label_cate
 feature_cols = [c for c in df_train.columns if c not in exclude_cols]
 embedded_dim = compute_embedded_input_dim(feature_cols, SERVICE_EMBEDDING_DIM)
 
-s1_base = BinaryDNN(embedded_dim, hidden_dims=[128, 64], dropout=0.3)
+s1_base = BinaryDNN(embedded_dim, hidden_dims=[128, 64], dropout=0.3,
+                    use_residual=False, activation='relu')
 model_s1 = ServiceEmbeddingModel(s1_base, vocab_size=69, feature_cols=feature_cols).to(device)
 model_s1.load_state_dict(torch.load(os.path.join(base_dir, 'model_stage1_best.pth'), map_location=device))
 
@@ -112,6 +113,9 @@ df_ext_enc['svc_auth_fail_score'] = (
     df_ext_enc['num_failed_logins'] / (df_ext_enc['num_failed_logins'] + df_ext_enc['num_compromised'] + eps)
 )
 df_ext_enc['serror_logged_cross'] = df_ext_enc['serror_rate'] * df_ext_enc['logged_in']
+df_ext_enc['is_failed_login'] = (
+    (df_ext_enc['num_failed_logins'] > 0) & (df_ext_enc['logged_in'] == 0)
+).astype(int)
 
 ZERO_INFLATED_COLS = ['src_bytes','dst_bytes','duration','num_failed_logins','num_shells','num_access_files','num_file_creations','num_root']
 for col in ZERO_INFLATED_COLS:
@@ -121,8 +125,13 @@ for col in ['src_bytes','dst_bytes','duration','hot']:
 
 numeric_cols = [c for c in train_feature_cols
     if not (c.startswith('protocol_type_') or c.startswith('service_') or c.startswith('flag_'))]
-scaler_cols = [c for c in numeric_cols if c in df_ext_enc.columns]
+# 二值特征不参与RobustScaler，改为手动映射 0→-3, 1→+3
+binary_cols = [c for c in numeric_cols if c.startswith('is_zero_') or c.startswith('is_ftp_telnet') or c == 'is_failed_login']
+scaler_cols = [c for c in numeric_cols if c in df_ext_enc.columns and c not in binary_cols]
 df_ext_enc[scaler_cols] = scaler.transform(df_ext_enc[scaler_cols])
+for col in binary_cols:
+    if col in df_ext_enc.columns:
+        df_ext_enc[col] = df_ext_enc[col] * 6 - 3
 
 X_ext = df_ext_enc[train_feature_cols].values.astype(np.float32)
 print(f"外部数据: {X_ext.shape}, 标签: {len(y_ext)}")

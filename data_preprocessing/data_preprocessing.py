@@ -373,10 +373,22 @@ def encode_and_scale(df_train, df_val, df_test):
     df_val_enc['serror_logged_cross'] = df_val_enc['serror_rate'] * df_val_enc['logged_in']
     df_test_enc['serror_logged_cross'] = df_test_enc['serror_rate'] * df_test_enc['logged_in']
 
-    print(f"\n[特征增强] 新增 3 个手工特征（针对 R2L/guess_passwd）:")
+    # 4. is_failed_login: (有登录尝试) & (未成功登录) — guess_passwd 的核心信号
+    df_train_enc['is_failed_login'] = (
+        (df_train_enc['num_failed_logins'] > 0) & (df_train_enc['logged_in'] == 0)
+    ).astype(int)
+    df_val_enc['is_failed_login'] = (
+        (df_val_enc['num_failed_logins'] > 0) & (df_val_enc['logged_in'] == 0)
+    ).astype(int)
+    df_test_enc['is_failed_login'] = (
+        (df_test_enc['num_failed_logins'] > 0) & (df_test_enc['logged_in'] == 0)
+    ).astype(int)
+
+    print(f"\n[特征增强] 新增 4 个手工特征（针对 R2L/guess_passwd）:")
     print(f"  is_ftp_telnet:       service∈{{ftp,telnet,ftp_data}} 的二元指示")
     print(f"  svc_auth_fail_score: ftp/telnet 下的 num_failed_logins/(num_failed_logins+num_compromised+ε)")
     print(f"  serror_logged_cross: serror_rate × logged_in 交叉项")
+    print(f"  is_failed_login:     (num_failed_logins>0) & (logged_in==0) — 登录失败标志")
 
     # ========== Log1p 变换：压缩极端偏态分布 ==========
     LOGP1_COLS = ['src_bytes', 'dst_bytes', 'duration', 'hot']
@@ -394,13 +406,17 @@ def encode_and_scale(df_train, df_val, df_test):
     # ---------- 数值型特征缩放 ----------
     print("\n[缩放] RobustScaler: 仅在训练集上 fit（中位数/IQR，抗异常值）")
 
+    # 二值特征不参与缩放（is_zero_*, is_ftp_telnet, is_failed_login 均为 0/1）
+    AUTH_BINARY_COLS = ['is_ftp_telnet', 'is_failed_login']
+    AUTH_CONTINUOUS_COLS = ['svc_auth_fail_score', 'serror_logged_cross']
+    BINARY_COLS_ALL = BINARY_INDICATOR_COLS + [c for c in AUTH_BINARY_COLS if c in df_train_enc.columns]
+
+    # 连续数值特征：原始数值列 + 认证连续特征
     numeric_cols = [col for col in NUMERIC_FEATURES if col in df_train_enc.columns]
-    numeric_cols.extend(BINARY_INDICATOR_COLS)  # 纳入新增的 is_zero_* 列
-    # 纳入手工特征
-    AUTH_FEATURE_COLS = ['is_ftp_telnet', 'svc_auth_fail_score', 'serror_logged_cross']
-    numeric_cols.extend([c for c in AUTH_FEATURE_COLS if c in df_train_enc.columns])
-    print(f"  缩放列数: {len(numeric_cols)}（含 {len(BINARY_INDICATOR_COLS)} 个 Binary Indicator"
-          f" + {len(AUTH_FEATURE_COLS)} 个手工特征）")
+    numeric_cols.extend([c for c in AUTH_CONTINUOUS_COLS if c in df_train_enc.columns])
+
+    print(f"  连续特征缩放: {len(numeric_cols)} 列")
+    print(f"  二值特征跳过缩放: {len(BINARY_COLS_ALL)} 列（{BINARY_COLS_ALL}）")
     scaler = RobustScaler()
     scaler.fit(df_train_enc[numeric_cols])
 
@@ -408,16 +424,22 @@ def encode_and_scale(df_train, df_val, df_test):
     df_val_scaled = df_val_enc.copy()
     df_test_scaled = df_test_enc.copy()
 
-    # 训练集: fit_transform（已经fit了，这里用transform）
+    # 仅对连续特征做 transform，二值特征保持原值
     df_train_scaled[numeric_cols] = scaler.transform(df_train_enc[numeric_cols])
-    # 验证集: 仅 transform
     df_val_scaled[numeric_cols] = scaler.transform(df_val_enc[numeric_cols])
-    # 测试集: 仅 transform
     df_test_scaled[numeric_cols] = scaler.transform(df_test_enc[numeric_cols])
 
-    print(f"  已对 {len(numeric_cols)} 个数值型特征进行缩放")
+    print(f"  已对 {len(numeric_cols)} 个连续数值特征进行缩放")
     print(f"  训练集缩放后中位数(前5): {np.median(df_train_scaled[numeric_cols[:5]].values, axis=0).round(4)}")
     print(f"  训练集缩放后IQR(前5): {np.subtract(*np.percentile(df_train_scaled[numeric_cols[:5]].values, [75, 25], axis=0)).round(4)}")
+
+    # 二值特征映射到 ±3：0→-3, 1→+3，与连续特征缩放后的值域对齐
+    BINARY_MAP = {-3: 0, 3: 1}
+    for col in BINARY_COLS_ALL:
+        df_train_scaled[col] = df_train_scaled[col] * 6 - 3
+        df_val_scaled[col] = df_val_scaled[col] * 6 - 3
+        df_test_scaled[col] = df_test_scaled[col] * 6 - 3
+    print(f"  二值特征映射: 0→-3, 1→+3 ({len(BINARY_COLS_ALL)} 列)")
 
     return df_train_scaled, df_val_scaled, df_test_scaled, ohe, scaler, ohe_feature_names, service_le
 
