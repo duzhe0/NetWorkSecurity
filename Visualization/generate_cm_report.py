@@ -32,17 +32,27 @@ def load_class_names():
         return [line.strip() for line in f if line.strip()]
 
 
-def load_confusion_matrix(model_name, source, scheme=None):
+def load_confusion_matrix(model_name, source, scheme=None, threshold=None):
     """
     从模型目录加载混淆矩阵。
     优先读 scheme 指定的 .npy，fallback 读通用 .npy，再 fallback 读 CSV。
     """
     model_dir = os.path.join(BASE_DIR, 'models', model_name)
+    th_suffix = f"_th{str(threshold).replace('.', '')}" if threshold else ""
 
     # 优先按 scheme 读 .npy
     if scheme:
         npy_name = f'cm_{source}_{scheme}.npy'
         npy_path = os.path.join(model_dir, npy_name)
+        if os.path.exists(npy_path):
+            cm = np.load(npy_path)
+            labels = load_class_names()
+            n = cm.shape[0]
+            return cm, labels[:n]
+
+    # threshold-specific .npy
+    if threshold:
+        npy_path = os.path.join(model_dir, f'cm_{source}{th_suffix}.npy')
         if os.path.exists(npy_path):
             cm = np.load(npy_path)
             labels = load_class_names()
@@ -58,9 +68,12 @@ def load_confusion_matrix(model_name, source, scheme=None):
         n = cm.shape[0]
         return cm, labels[:n]
 
-    # Fallback: metrics CSV
-    csv_name = f'results_{model_name}_metrics.csv' if source == 'internal' else f'results_{model_name}_external_test.csv'
-    csv_path = os.path.join(model_dir, csv_name)
+    # Fallback: metrics CSV (with threshold suffix)
+    if threshold:
+        csv_path = os.path.join(model_dir, f'results_{model_name}_external_test{th_suffix}.csv')
+    else:
+        csv_name = f'results_{model_name}_metrics.csv' if source == 'internal' else f'results_{model_name}_external_test.csv'
+        csv_path = os.path.join(model_dir, csv_name)
     if os.path.exists(csv_path):
         df = pd.read_csv(csv_path)
         cm_str = df['confusion_matrix'].values[0]
@@ -221,7 +234,7 @@ def generate_report(model_name, source, version, cm, class_names):
 def main():
     parser = argparse.ArgumentParser(description='混淆矩阵分析报告生成器')
     parser.add_argument('--model', type=str, required=True,
-                        choices=['xgboost', 'dnn', 'cnn1d', 'transformer'],
+                        choices=['xgboost', 'dnn', 'cnn1d', 'transformer', 'two_stage'],
                         help='模型名称')
     parser.add_argument('--source', type=str, required=True,
                         choices=['internal', 'external'],
@@ -230,18 +243,22 @@ def main():
                         help='实验版本号，如 1.3b')
     parser.add_argument('--scheme', type=str, default=None,
                         help='权重方案名，如 none/balanced/sqrt/log1p')
+    parser.add_argument('--threshold', type=float, default=None,
+                        help='阈值，如 0.6 或 0.7')
     args = parser.parse_args()
 
-    print(f"[生成报告] 模型={args.model}, 数据源={args.source}, 版本={args.version}")
+    th_str = f" (th={args.threshold})" if args.threshold else ""
+    print(f"[生成报告] 模型={args.model}, 数据源={args.source}, 版本={args.version}{th_str}")
     print("=" * 60)
 
-    cm, class_names = load_confusion_matrix(args.model, args.source, args.scheme)
+    cm, class_names = load_confusion_matrix(args.model, args.source, args.scheme, args.threshold)
     print(f"[混淆矩阵] 形状={cm.shape}, 总样本={int(cm.sum())}")
 
     report = generate_report(args.model, args.source, args.version, cm, class_names)
 
     os.makedirs(AIMEMORY_DIR, exist_ok=True)
-    filename = f"{args.version}_{args.model}_{args.source}_cm.md"
+    th_suffix = f"_th{str(args.threshold).replace('.', '')}" if args.threshold else ""
+    filename = f"{args.version}_{args.model}_{args.source}_cm{th_suffix}.md"
     filepath = os.path.join(AIMEMORY_DIR, filename)
 
     with open(filepath, 'w', encoding='utf-8') as f:
