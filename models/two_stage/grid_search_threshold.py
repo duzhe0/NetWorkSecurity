@@ -1,30 +1,17 @@
 """
-保存 Two-Stage 模型的混淆矩阵（外部测试集），格式与其它模型一致
-用法: python save_cm.py --threshold 0.6
+双阈值网格扫描：s1_threshold × s2_threshold
+只加载一次模型和数据，遍历所有组合
 """
-import os, sys, random, argparse
+import os, sys, random
 import numpy as np
 import pandas as pd
 import torch
 import joblib
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 
 SEED = 42
 random.seed(SEED); np.random.seed(SEED)
 torch.manual_seed(SEED); torch.cuda.manual_seed_all(SEED)
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--threshold', type=float, default=None, help='统一阈值（同时设置 s1 和 s2）')
-parser.add_argument('--s1_threshold', type=float, default=0.5)
-parser.add_argument('--s2_threshold', type=float, default=0.5)
-args = parser.parse_args()
-
-if args.threshold is not None:
-    S1_TH = args.threshold
-    S2_TH = args.threshold
-else:
-    S1_TH = args.s1_threshold
-    S2_TH = args.s2_threshold
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, base_dir)
@@ -116,38 +103,64 @@ df_ext_enc[scaler_cols] = scaler.transform(df_ext_enc[scaler_cols])
 X_ext = df_ext_enc[train_feature_cols].values.astype(np.float32)
 print(f"外部数据: {X_ext.shape}, 标签: {len(y_ext)}")
 
-# Predict
-print(f"使用双阈值: s1={S1_TH}, s2={S2_TH}")
-y_pred, _, _ = two_stage_predict(model_s1, model_s2, X_ext, s2_reverse,
-                                  s1_threshold=S1_TH, s2_threshold=S2_TH)
+# 基线指标
+n_uk = (y_ext == 23).sum()
+print(f"\nunknown_attack 样本: {n_uk}")
 
-# Build full 24-class labels (0-23)
-all_labels = list(range(24))
+# ============ 网格扫描 ============
+s1_range = [0.3, 0.4, 0.5, 0.6, 0.7]
+s2_range = [0.5, 0.6, 0.7, 0.75, 0.8]
 
-# Compute confusion matrix
-cm = confusion_matrix(y_ext, y_pred, labels=all_labels)
-print(f"混淆矩阵: {cm.shape}, 总样本: {cm.sum()}")
+print(f"\n{'='*70}")
+print(f"双阈值网格扫描: s1 ∈ {s1_range}, s2 ∈ {s2_range}")
+print(f"{'='*70}")
+print(f"{'s1_th':>6}  {'s2_th':>6}  {'Acc':>8}  {'F1':>8}  {'UK_recall':>10}  {'normal→attack':>14}  {'normal→satan':>13}")
+print(f"{'-'*70}")
 
-# Accuracy
-acc = cm.diagonal().sum() / cm.sum()
-print(f"Accuracy: {acc:.4f}")
+results = []
+for s1_th in s1_range:
+    for s2_th in s2_range:
+        y_pred, s1_prob, s2_prob = two_stage_predict(
+            model_s1, model_s2, X_ext, s2_reverse,
+            s1_threshold=s1_th, s2_threshold=s2_th)
 
-# Save as CSV (same format as other models)
-# 双阈值时用 s1_s2 格式命名；单阈值时用 th 格式命名（向后兼容）
-if args.threshold is not None:
-    th_suffix = f"_th{str(args.threshold).replace('.', '')}"
-else:
-    th_suffix = f"_s1{str(S1_TH).replace('.', '')}_s2{str(S2_TH).replace('.', '')}"
-output_csv = os.path.join(base_dir, 'models', 'two_stage', f'results_two_stage_external_test{th_suffix}.csv')
-df_result = pd.DataFrame([{
-    'test_acc': acc,
-    'test_samples': int(cm.sum()),
-    'test_file': 'train_test',
-    'confusion_matrix': cm.tolist()
-}])
-df_result.to_csv(output_csv, index=False)
-print(f"混淆矩阵已保存: {output_csv}")
+        acc = accuracy_score(y_ext, y_pred)
+        f1 = f1_score(y_ext, y_pred, average='weighted', zero_division=0)
 
-# Save .npy for visualization tools
-np.save(os.path.join(base_dir, 'models', 'two_stage', f'cm_external{th_suffix}.npy'), cm)
-print("npy 文件已保存")
+        # unknown_attack recall
+        n_uk_caught = ((y_pred == 23) & (y_ext == 23)).sum()
+        uk_recall = n_uk_caught / n_uk if n_uk > 0 else 0
+
+        # normal misclassified as attack (coming through Stage1)
+        normal_mask = (y_ext == 11)
+        normal_to_attack = ((normal_mask) & (y_pred != 11)).sum()
+
+        # normal→satan specifically
+        normal_to_satan = ((normal_mask) & (y_pred == 2)).sum()
+
+        results.append({
+            's1_th': s1_th, 's2_th': s2_th,
+            'acc': acc, 'f1': f1,
+            'uk_recall': uk_recall,
+            'normal_to_attack': normal_to_attack,
+            'normal_to_satan': normal_to_satan,
+        })
+
+        print(f"{s1_th:>6.2f}  {s2_th:>6.2f}  {acc:>8.4f}  {f1:>8.4f}  {uk_recall:>10.4f}  {normal_to_attack:>14d}  {normal_to_satan:>13d}")
+
+# 按 Acc 排序输出 Top 10
+print(f"\n{'='*70}")
+print("Top 10 组合 (按 Acc 排序):")
+print(f"{'='*70}")
+results.sort(key=lambda x: -x['acc'])
+for i, r in enumerate(results[:10]):
+    print(f"{i+1:>2}. s1={r['s1_th']:.2f}, s2={r['s2_th']:.2f}  "
+          f"Acc={r['acc']:.4f}  F1={r['f1']:.4f}  "
+          f"UK_recall={r['uk_recall']:.4f}  "
+          f"normal→attack={r['normal_to_attack']}  normal→satan={r['normal_to_satan']}")
+
+# 保存结果
+df_results = pd.DataFrame(results)
+output = os.path.join(base_dir, 'models', 'two_stage', 'grid_search_dual_threshold.csv')
+df_results.to_csv(output, index=False)
+print(f"\n结果已保存: {output}")

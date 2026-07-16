@@ -37,14 +37,14 @@ def load_all_class_names():
     return names
 
 
-def load_confusion_matrix(model_name, source='internal', threshold=None):
+def load_confusion_matrix(model_name, source='internal', threshold=None, cm_suffix=None):
     """
     从 CSV 加载并解析混淆矩阵。
     source='internal' → results_{model}_metrics.csv (KDDTrain 测试集)
     source='external' → results_{model}_external_test.csv (train_test 外部集)
     也支持从 .npy 文件加载（优先 CSV）。
     """
-    th_suffix = f"_th{str(threshold).replace('.', '')}" if threshold else ""
+    th_suffix = f"_th{str(threshold).replace('.', '')}" if threshold else (cm_suffix or "")
     if source == 'internal':
         filename = f'results_{model_name}_metrics.csv'
     else:
@@ -249,6 +249,8 @@ def main():
                         help='单模型模式（不指定则默认 XGBoost vs DNN 对比）')
     parser.add_argument('--threshold', type=float, default=None,
                         help='阈值，如 0.6 或 0.7')
+    parser.add_argument('--cm_suffix', type=str, default=None,
+                        help='自定义 CM 文件后缀，如 _s107_s2075')
     args = parser.parse_args()
 
     source_label = 'KDDTrain_preprocessed_test (内部测试集 20%)' if args.source == 'internal' \
@@ -263,10 +265,15 @@ def main():
     if args.model:
         # 单模型模式
         model_label = args.model.upper().replace('_', ' ')
-        th_suffix = f"_th{str(args.threshold).replace('.', '')}" if args.threshold else ""
+        if args.cm_suffix:
+            th_suffix = args.cm_suffix
+        elif args.threshold:
+            th_suffix = f"_th{str(args.threshold).replace('.', '')}"
+        else:
+            th_suffix = ""
         output_name = f'confusion_matrix_{args.model}_{args.source}{th_suffix}.png'
 
-        cm, acc, n, _ = load_confusion_matrix(args.model, args.source, args.threshold)
+        cm, acc, n, _ = load_confusion_matrix(args.model, args.source, args.threshold, args.cm_suffix)
         class_labels = deduce_labels(cm, full_names)
         print(f"[类别] 共 {len(class_labels)} 个")
 

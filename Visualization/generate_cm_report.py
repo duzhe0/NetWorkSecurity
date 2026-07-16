@@ -32,13 +32,13 @@ def load_class_names():
         return [line.strip() for line in f if line.strip()]
 
 
-def load_confusion_matrix(model_name, source, scheme=None, threshold=None):
+def load_confusion_matrix(model_name, source, scheme=None, threshold=None, cm_suffix=None):
     """
     从模型目录加载混淆矩阵。
-    优先读 scheme 指定的 .npy，fallback 读通用 .npy，再 fallback 读 CSV。
+    优先读 scheme 指定的 .npy，再按 threshold/cm_suffix 读，再 fallback 通用文件。
     """
     model_dir = os.path.join(BASE_DIR, 'models', model_name)
-    th_suffix = f"_th{str(threshold).replace('.', '')}" if threshold else ""
+    th_suffix = f"_th{str(threshold).replace('.', '')}" if threshold else (cm_suffix or "")
 
     # 优先按 scheme 读 .npy
     if scheme:
@@ -245,19 +245,26 @@ def main():
                         help='权重方案名，如 none/balanced/sqrt/log1p')
     parser.add_argument('--threshold', type=float, default=None,
                         help='阈值，如 0.6 或 0.7')
+    parser.add_argument('--cm_suffix', type=str, default=None,
+                        help='自定义 CM 文件后缀，如 _s107_s2075')
     args = parser.parse_args()
 
-    th_str = f" (th={args.threshold})" if args.threshold else ""
+    th_str = f" (th={args.threshold})" if args.threshold else (f" ({args.cm_suffix})" if args.cm_suffix else "")
     print(f"[生成报告] 模型={args.model}, 数据源={args.source}, 版本={args.version}{th_str}")
     print("=" * 60)
 
-    cm, class_names = load_confusion_matrix(args.model, args.source, args.scheme, args.threshold)
+    cm, class_names = load_confusion_matrix(args.model, args.source, args.scheme, args.threshold, args.cm_suffix)
     print(f"[混淆矩阵] 形状={cm.shape}, 总样本={int(cm.sum())}")
 
     report = generate_report(args.model, args.source, args.version, cm, class_names)
 
     os.makedirs(AIMEMORY_DIR, exist_ok=True)
-    th_suffix = f"_th{str(args.threshold).replace('.', '')}" if args.threshold else ""
+    if args.threshold:
+        th_suffix = f"_th{str(args.threshold).replace('.', '')}"
+    elif args.cm_suffix:
+        th_suffix = args.cm_suffix
+    else:
+        th_suffix = ""
     filename = f"{args.version}_{args.model}_{args.source}_cm{th_suffix}.md"
     filepath = os.path.join(AIMEMORY_DIR, filename)
 

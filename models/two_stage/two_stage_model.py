@@ -247,8 +247,13 @@ def train_stage2(model, X_train, y_train, X_val, y_val, num_classes=23, epochs=8
 
 # ==================== 预测与评估 ====================
 
-def two_stage_predict(model_s1, model_s2, X, s2_reverse, conf_threshold=0.5):
-    """两阶段联合预测"""
+def two_stage_predict(model_s1, model_s2, X, s2_reverse, s1_threshold=0.5, s2_threshold=0.5):
+    """两阶段联合预测
+    
+    Args:
+        s1_threshold: Stage1 二分类阈值，控制 normal vs attack 判定
+        s2_threshold: Stage2 置信度阈值，控制是否接受攻击细分结果
+    """
     N = len(X)
     Xt = torch.FloatTensor(X).to(device)
 
@@ -260,7 +265,7 @@ def two_stage_predict(model_s1, model_s2, X, s2_reverse, conf_threshold=0.5):
         s2_logits = model_s2(Xt)
         s2_prob = torch.softmax(s2_logits, dim=1).cpu().numpy()
 
-    is_attack = s1_prob[:, 1] >= 0.5
+    is_attack = s1_prob[:, 1] >= s1_threshold
     s2_max_prob = s2_prob.max(axis=1)
     s2_pred = s2_prob.argmax(axis=1)
 
@@ -270,7 +275,7 @@ def two_stage_predict(model_s1, model_s2, X, s2_reverse, conf_threshold=0.5):
             s2_class = s2_pred[i]
             if s2_class == 22:
                 final[i] = 11
-            elif s2_max_prob[i] >= conf_threshold:
+            elif s2_max_prob[i] >= s2_threshold:
                 final[i] = s2_reverse.get(s2_class, 23)
             else:
                 final[i] = 23
@@ -278,14 +283,14 @@ def two_stage_predict(model_s1, model_s2, X, s2_reverse, conf_threshold=0.5):
     return final, s1_prob, s2_prob
 
 
-def evaluate_two_stage(model_s1, model_s2, data, s2_reverse, label, conf_threshold=0.5):
+def evaluate_two_stage(model_s1, model_s2, data, s2_reverse, label, s1_threshold=0.5, s2_threshold=0.5):
     """完整评估两阶段分类"""
     X = data['X_test']
     y_true = label
     class_names = data['class_names']
 
     y_pred, s1_prob, s2_prob = two_stage_predict(
-        model_s1, model_s2, X, s2_reverse, conf_threshold)
+        model_s1, model_s2, X, s2_reverse, s1_threshold, s2_threshold)
 
     acc = accuracy_score(y_true, y_pred)
     f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
@@ -302,7 +307,7 @@ def evaluate_two_stage(model_s1, model_s2, data, s2_reverse, label, conf_thresho
         n_uk = 0
         n_uk_caught = 0
 
-    print(f"\n[两阶段评估] threshold={conf_threshold}")
+    print(f"\n[两阶段评估] s1_th={s1_threshold}, s2_th={s2_threshold}")
     print(f"  Acc: {acc:.4f}, F1: {f1:.4f}")
     print(f"  判为 normal:     {n_normal_pred}")
     print(f"  判为 unknown:    {n_unknown_pred}")
@@ -382,7 +387,7 @@ def main():
     print("=" * 60)
     for th in [0.5, 0.7, 0.9]:
         evaluate_two_stage(model_s1, model_s2, data, data['s2_reverse'],
-                           data['mc_test'], conf_threshold=th)
+                           data['mc_test'], s2_threshold=th)
 
     # ===== 外部评估 =====
     print(f"\n{'='*60}")
@@ -474,7 +479,7 @@ def main():
 
     for th in [0.5, 0.7, 0.9]:
         y_pred_ext, s1p_ext, s2p_ext = two_stage_predict(
-            model_s1, model_s2, X_ext, data['s2_reverse'], conf_threshold=th)
+            model_s1, model_s2, X_ext, data['s2_reverse'], s2_threshold=th)
 
         ext_acc = accuracy_score(y_ext, y_pred_ext)
         ext_f1 = f1_score(y_ext, y_pred_ext, average='weighted', zero_division=0)
