@@ -13,6 +13,8 @@ models/cnn1d/*.png
 models/transformer/*.pth
 models/transformer/*.csv
 models/transformer/*.png
+models/two_stage/*.csv
+
 models/two_stage/grid_search_dual_threshold.csv
 model_*.pth
 model_*.pkl

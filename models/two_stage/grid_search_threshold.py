@@ -2,7 +2,7 @@
 双阈值网格扫描：s1_threshold × s2_threshold
 只加载一次模型和数据，遍历所有组合
 """
-import os, sys, random
+import os, sys, random, argparse
 import numpy as np
 import pandas as pd
 import torch
@@ -42,6 +42,11 @@ s2_reverse = {new: orig for new, orig in enumerate(orig_attack_labels)}
 s2_reverse[22] = 11
 
 # Load and preprocess external test set
+parser = argparse.ArgumentParser()
+parser.add_argument('--test_file', type=str, default='train_test',
+                    help='外部测试文件（Train目录下），如 train_test / KDDTest+ / KDDTest-21')
+args = parser.parse_args()
+
 ohe = joblib.load(os.path.join(train_dir, 'encoder_onehot.pkl'))
 scaler = joblib.load(os.path.join(train_dir, 'scaler_robust.pkl'))
 service_le = joblib.load(os.path.join(train_dir, 'encoder_service_embedding.pkl'))
@@ -58,7 +63,8 @@ col_names = ['duration','protocol_type','service','flag','src_bytes','dst_bytes'
     'dst_host_srv_diff_host_rate','dst_host_serror_rate','dst_host_srv_serror_rate',
     'dst_host_rerror_rate','dst_host_srv_rerror_rate','label','difficulty']
 
-ext_path = os.path.join(base_dir, 'Train', 'train_test')
+ext_path = os.path.join(base_dir, 'Train', args.test_file)
+test_basename = args.test_file.replace('.txt', '').replace('.csv', '')
 df_ext = pd.read_csv(ext_path, header=None, names=col_names, low_memory=False)
 
 with open(os.path.join(train_dir, 'encoder_multiclass_23_classes.txt')) as f:
@@ -181,6 +187,6 @@ for i, r in enumerate(results[:10]):
 
 # 保存结果
 df_results = pd.DataFrame(results)
-output = os.path.join(base_dir, 'models', 'two_stage', 'grid_search_dual_threshold.csv')
+output = os.path.join(base_dir, 'models', 'two_stage', f'grid_search_{test_basename}.csv')
 df_results.to_csv(output, index=False)
 print(f"\n结果已保存: {output}")

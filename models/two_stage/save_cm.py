@@ -17,6 +17,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--threshold', type=float, default=None, help='统一阈值（同时设置 s1 和 s2）')
 parser.add_argument('--s1_threshold', type=float, default=0.5)
 parser.add_argument('--s2_threshold', type=float, default=0.5)
+parser.add_argument('--test_file', type=str, default='train_test',
+                    help='外部测试文件（Train目录下），如 train_test / KDDTest+ / KDDTest-21')
 args = parser.parse_args()
 
 if args.threshold is not None:
@@ -71,7 +73,8 @@ col_names = ['duration','protocol_type','service','flag','src_bytes','dst_bytes'
     'dst_host_srv_diff_host_rate','dst_host_serror_rate','dst_host_srv_serror_rate',
     'dst_host_rerror_rate','dst_host_srv_rerror_rate','label','difficulty']
 
-ext_path = os.path.join(base_dir, 'Train', 'train_test')
+ext_path = os.path.join(base_dir, 'Train', args.test_file)
+test_basename = args.test_file.replace('.txt', '').replace('.csv', '')
 df_ext = pd.read_csv(ext_path, header=None, names=col_names, low_memory=False)
 
 with open(os.path.join(train_dir, 'encoder_multiclass_23_classes.txt')) as f:
@@ -158,16 +161,16 @@ if args.threshold is not None:
     th_suffix = f"_th{str(args.threshold).replace('.', '')}"
 else:
     th_suffix = f"_s1{str(S1_TH).replace('.', '')}_s2{str(S2_TH).replace('.', '')}"
-output_csv = os.path.join(base_dir, 'models', 'two_stage', f'results_two_stage_external_test{th_suffix}.csv')
+output_csv = os.path.join(base_dir, 'models', 'two_stage', f'results_two_stage_{test_basename}{th_suffix}.csv')
 df_result = pd.DataFrame([{
     'test_acc': acc,
     'test_samples': int(cm.sum()),
-    'test_file': 'train_test',
+    'test_file': args.test_file,
     'confusion_matrix': cm.tolist()
 }])
 df_result.to_csv(output_csv, index=False)
 print(f"混淆矩阵已保存: {output_csv}")
 
 # Save .npy for visualization tools
-np.save(os.path.join(base_dir, 'models', 'two_stage', f'cm_external{th_suffix}.npy'), cm)
+np.save(os.path.join(base_dir, 'models', 'two_stage', f'cm_{test_basename}{th_suffix}.npy'), cm)
 print("npy 文件已保存")
